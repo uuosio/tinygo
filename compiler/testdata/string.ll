@@ -7,7 +7,7 @@ target triple = "wasm32--wasi"
 
 @"main.someString$string" = internal unnamed_addr constant [3 x i8] c"foo", align 1
 
-declare noalias nonnull i8* @runtime.alloc(i32, i8*, i8*)
+declare noalias nonnull i8* @runtime.alloc(i32, i8*, i8*, i8*)
 
 define hidden void @main.init(i8* %context, i8* %parentHandle) unnamed_addr {
 entry:

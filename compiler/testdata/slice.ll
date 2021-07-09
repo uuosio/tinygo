@@ -3,7 +3,7 @@ source_filename = "slice.go"
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
 target triple = "wasm32--wasi"
 
-declare noalias nonnull i8* @runtime.alloc(i32, i8*, i8*)
+declare noalias nonnull i8* @runtime.alloc(i32, i8*, i8*, i8*)
 
 define hidden void @main.init(i8* %context, i8* %parentHandle) unnamed_addr {
 entry:
@@ -39,7 +39,7 @@ declare void @runtime.lookupPanic(i8*, i8*)
 
 define hidden { i32*, i32, i32 } @main.sliceAppendValues(i32* %ints.data, i32 %ints.len, i32 %ints.cap, i8* %context, i8* %parentHandle) unnamed_addr {
 entry:
-  %varargs = call i8* @runtime.alloc(i32 12, i8* undef, i8* null)
+  %varargs = call i8* @runtime.alloc(i32 12, i8* null, i8* undef, i8* null)
   %0 = bitcast i8* %varargs to i32*
   store i32 1, i32* %0, align 4
   %1 = getelementptr inbounds i8, i8* %varargs, i32 4

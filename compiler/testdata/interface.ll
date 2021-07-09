@@ -23,7 +23,7 @@ target triple = "wasm32--wasi"
 @"reflect/types.typeid:basic:int" = external constant i8
 @"error$interface" = linkonce_odr constant [1 x i8*] [i8* @"reflect/methods.Error() string"]
 
-declare noalias nonnull i8* @runtime.alloc(i32, i8*, i8*)
+declare noalias nonnull i8* @runtime.alloc(i32, i8*, i8*, i8*)
 
 define hidden void @main.init(i8* %context, i8* %parentHandle) unnamed_addr {
 entry:
