@@ -48,6 +48,8 @@ func TestCompiler(t *testing.T) {
 		{"pragma.go", ""},
 		{"goroutine.go", "wasm"},
 		{"goroutine.go", "cortex-m-qemu"},
+		{"gc.go", "cortex-m-qemu"},
+		{"gc.go", "atmega1284p"},
 	}
 
 	for _, tc := range tests {
