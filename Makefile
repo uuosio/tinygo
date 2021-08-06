@@ -210,9 +210,21 @@ TEST_PACKAGES = \
 # TODO: parallelize, and only show failing tests (no implied -v flag).
 .PHONY: tinygo-test
 tinygo-test:
-	$(TINYGO) test $(TEST_PACKAGES)
+	GOARCH=amd64 $(TINYGO) test $(TEST_PACKAGES)
 	# until "test testing" passes
 	cd tests/tinygotest && $(TINYGO) test benchmark_test.go
+
+# Test all architectures (not just the host architecture).
+.PHONY: tinygo-test-all tinygo-test-386 tinygo-test-arm tinygo-test-arm64 tinygo-test-wasi
+tinygo-test-all: tinygo-test tinygo-test-386 tinygo-test-arm tinygo-test-arm64 tinygo-test-wasi
+tinygo-test-386:
+	GOARCH=386 $(TINYGO) test $(TEST_PACKAGES)
+tinygo-test-arm:
+	GOARCH=arm $(TINYGO) test $(TEST_PACKAGES)
+tinygo-test-arm64:
+	GOARCH=arm64 $(TINYGO) test $(TEST_PACKAGES)
+tinygo-test-wasi:
+	$(TINYGO) test -target=wasi $(TEST_PACKAGES)
 
 .PHONY: smoketest
 smoketest:

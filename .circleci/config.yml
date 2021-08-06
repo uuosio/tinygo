@@ -196,6 +196,7 @@ commands:
             - /go/pkg/mod
       - run: make gen-device -j4
       - run: make smoketest TINYGO=build/tinygo
+      - run: make tinygo-test-all
   build-linux:
     steps:
       - checkout
