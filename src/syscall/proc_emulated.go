@@ -1,4 +1,4 @@
-// +build baremetal wasi wasm
+// +build baremetal wasi wasm eosio
 
 // This file emulates some process-related functions that are only available
 // under a real operating system.

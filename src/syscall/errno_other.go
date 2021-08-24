@@ -1,4 +1,4 @@
-// +build !wasi,!darwin
+// +build !wasi,!darwin,!eosio
 
 package syscall
 

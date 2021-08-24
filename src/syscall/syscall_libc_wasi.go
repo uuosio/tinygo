@@ -1,4 +1,4 @@
-// +build wasi
+// +build wasi eosio
 
 package syscall
 

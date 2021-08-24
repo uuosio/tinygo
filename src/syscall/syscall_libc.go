@@ -1,4 +1,4 @@
-// +build darwin nintendoswitch wasi
+// +build darwin nintendoswitch wasi eosio
 
 package syscall
 
