@@ -39,6 +39,7 @@ type Options struct {
 	Programmer      string
 	OpenOCDCommands []string
 	LLVMFeatures    string
+	GenCode         bool
 }
 
 // Verify performs a validation on the given options, raising an error if options are not valid.

@@ -121,11 +121,32 @@ func printCommand(cmd string, args ...string) {
 	fmt.Fprintln(os.Stderr, strings.Join(command, " "))
 }
 
+func IsEosioPlatform(tags []string) bool {
+	for _, v := range tags {
+		if v == "eosio" {
+			return true
+		}
+	}
+	return false
+}
+
 // Build compiles and links the given package and writes it to outpath.
 func Build(pkgName, outpath string, options *compileopts.Options) error {
 	config, err := builder.NewConfig(options)
 	if err != nil {
 		return err
+	}
+
+	// fmt.Println("+++++++++config:", config)
+	// fmt.Println("++++", config.Target.BuildTags)
+
+	if IsEosioPlatform(config.Target.BuildTags) {
+		if options.GenCode {
+			if err := GenerateCode(pkgName); err != nil {
+				return err
+			}
+		}
+		//		HandleActionAndTable(pkgName)
 	}
 
 	return builder.Build(pkgName, outpath, config, func(result builder.BuildResult) error {
@@ -1027,6 +1048,7 @@ func main() {
 	ldflags := flag.String("ldflags", "", "Go link tool compatible ldflags")
 	wasmAbi := flag.String("wasm-abi", "", "WebAssembly ABI conventions: js (no i64 params) or generic")
 	llvmFeatures := flag.String("llvm-features", "", "comma separated LLVM features to enable")
+	genCode := flag.Bool("gen-code", true, "Generate extra code for Smart Contracts")
 
 	var flagJSON, flagDeps, flagTest *bool
 	if command == "help" || command == "list" {
@@ -1096,6 +1118,7 @@ func main() {
 		Programmer:      *programmer,
 		OpenOCDCommands: ocdCommands,
 		LLVMFeatures:    *llvmFeatures,
+		GenCode:         *genCode,
 	}
 	if *printCommands {
 		options.PrintCommands = printCommand
@@ -1128,7 +1151,6 @@ func main() {
 		if options.Target == "" && filepath.Ext(outpath) == ".wasm" {
 			options.Target = "wasm"
 		}
-
 		err := Build(pkgName, outpath, options)
 		handleCompilerError(err)
 	case "build-library":
