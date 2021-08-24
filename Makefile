@@ -176,6 +176,12 @@ lib/wasi-libc/sysroot/lib/wasm32-wasi/libc.a:
 	@if [ ! -e lib/wasi-libc/Makefile ]; then echo "Submodules have not been downloaded. Please download them using:\n  git submodule update --init"; exit 1; fi
 	cd lib/wasi-libc && make -j4 WASM_CC=$(CLANG) WASM_AR=$(LLVM_AR) WASM_NM=$(LLVM_NM)
 
+.PHONY: wasi-libc-eosio
+wasi-libc-eosio: lib/wasi-libc-eosio/sysroot/lib/wasm32-wasi/libc.a
+lib/wasi-libc-eosio/sysroot/lib/wasm32-wasi/libc.a:
+	@if [ ! -e lib/wasi-libc-eosio/Makefile ]; then echo "Submodules have not been downloaded. Please download them using:\n  git submodule update --init"; exit 1; fi
+	cd lib/wasi-libc-eosio && make -j4 WASM_CC=$(CLANG) WASM_AR=$(LLVM_AR) WASM_NM=$(LLVM_NM)
+
 
 # Build the Go compiler.
 tinygo:
@@ -457,6 +463,7 @@ build/release: tinygo gen-device wasi-libc
 	@mkdir -p build/release/tinygo/lib/nrfx
 	@mkdir -p build/release/tinygo/lib/picolibc/newlib/libc
 	@mkdir -p build/release/tinygo/lib/wasi-libc
+	@mkdir -p build/release/tinygo/lib/wasi-libc-eosio
 	@mkdir -p build/release/tinygo/pkg/armv6m-none-eabi
 	@mkdir -p build/release/tinygo/pkg/armv7m-none-eabi
 	@mkdir -p build/release/tinygo/pkg/armv7em-none-eabi
@@ -476,6 +483,7 @@ build/release: tinygo gen-device wasi-libc
 	@cp -rp lib/picolibc/newlib/libc/tinystdio   build/release/tinygo/lib/picolibc/newlib/libc
 	@cp -rp lib/picolibc-include         build/release/tinygo/lib
 	@cp -rp lib/wasi-libc/sysroot        build/release/tinygo/lib/wasi-libc/sysroot
+	@cp -rp lib/wasi-libc-eosio/sysroot        build/release/tinygo/lib/wasi-libc-eosio/sysroot
 	@cp -rp src                          build/release/tinygo/src
 	@cp -rp targets                      build/release/tinygo/targets
 	./build/tinygo build-library -target=armv6m-none-eabi  -o build/release/tinygo/pkg/armv6m-none-eabi/compiler-rt.a compiler-rt
