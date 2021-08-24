@@ -23,9 +23,9 @@
 [submodule "lib/stm32-svd"]
 	path = lib/stm32-svd
 	url = https://github.com/tinygo-org/stm32-svd
-[submodule "lib/wasi-libc-eosio"]
-	path = lib/wasi-libc-eosio
-	url = https://github.com/uuosio/wasi-libc
 [submodule "src/chain"]
 	path = src/chain
 	url = https://github.com/uuosio/go-chain
+[submodule "lib/wasi-libc-eosio"]
+	path = lib/wasi-libc-eosio
+	url = https://github.com/uuosio/wasi-libc
