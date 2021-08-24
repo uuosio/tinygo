@@ -1,4 +1,4 @@
-// +build darwin freebsd wasi
+// +build darwin freebsd wasi eosio
 
 // This implementation of crypto/rand uses the getentropy system call (available
 // on both MacOS and WASI) to generate random numbers.

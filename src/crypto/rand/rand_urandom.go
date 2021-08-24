@@ -1,4 +1,4 @@
-// +build linux,!baremetal,!wasi
+// +build linux,!baremetal,!wasi,!eosio
 
 // This implementation of crypto/rand uses the /dev/urandom pseudo-file to
 // generate random numbers.
