@@ -61,6 +61,12 @@ targets supported by TinyGo:
 
 This can take over an hour depending on the speed of your system.
 
+## Build libc for EOSIO
+
+```
+make wasi-libc-eosio
+```
+
 ## Build TinyGo
 
 The last step of course is to build TinyGo itself. This can again be done with
