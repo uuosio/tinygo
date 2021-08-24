@@ -1,6 +1,22 @@
-// +build !eosio
+// +build eosio
 
 package runtime
+
+/*
+	#include <stdint.h>
+	void eosio_assert(int32_t test, const char* msg);
+*/
+import "C"
+
+func eosio_assert(test bool, msg string) {
+	buf := Alloc(uintptr(len(msg) + 1))
+	pp := (*[1 << 30]byte)(buf)
+	copy(pp[:], msg)
+	pp[len(msg)] = 0
+	if !test {
+		C.eosio_assert(0, (*C.char)(buf))
+	}
+}
 
 // trap is a compiler hint that this function cannot be executed. It is
 // translated into either a trap instruction or a call to abort().
@@ -9,10 +25,20 @@ func trap()
 
 // Builtin function panic(msg), used as a compiler intrinsic.
 func _panic(message interface{}) {
-	printstring("panic: ")
-	printitf(message)
-	printnl()
-	abort()
+	switch v := message.(type) {
+	case string:
+		msg := "panic: " + v
+		eosio_assert(false, msg)
+	case error:
+		msg := "panic:" + v.Error()
+		eosio_assert(false, msg)
+	default:
+		eosio_assert(false, "panic")
+	}
+	// printstring("panic: ")
+	// printitf(message)
+	// printnl()
+	// eosio_assert(false, msg)
 }
 
 // Cause a runtime panic, which is (currently) always a string.

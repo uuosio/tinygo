@@ -1,6 +1,12 @@
-// +build tinygo.wasm,!eosio
+// +build tinygo.wasm, eosio
 
 package runtime
+
+/*
+#include <stdint.h>
+void prints( const char* cstr );
+*/
+import "C"
 
 import (
 	"unsafe"
@@ -45,7 +51,8 @@ func putchar(c byte) {
 
 	if c == '\n' || putcharPosition >= putcharBufferSize {
 		putcharIOVec.bufLen = putcharPosition
-		fd_write(stdout, &putcharIOVec, 1, &putcharNWritten)
+		C.prints((*C.char)(unsafe.Pointer(&putcharBuffer)))
+		//		fd_write(stdout, &putcharIOVec, 1, &putcharNWritten)
 		putcharPosition = 0
 	}
 }
