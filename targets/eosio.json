@@ -1,0 +1,22 @@
+{
+	"llvm-target":   "wasm32--eosio",
+	"build-tags":    ["tinygo.wasm", "eosio"],
+	"goos":          "linux",
+	"goarch":        "arm",
+	"linker":        "wasm-ld",
+	"libc":          "wasi-libc-eosio",
+	"cflags": [
+		"--target=wasm32--wasi",
+		"--sysroot={root}/lib/wasi-libc-eosio/sysroot",
+		"-Oz"
+	],
+	"ldflags": [
+		"--allow-undefined",
+		"--stack-first",
+		"--export-dynamic",
+		"--no-demangle",
+		"-zstack-size=8192"
+	],
+	"emulator":      ["wasmtime"],
+	"wasm-abi":      "generic"
+}
