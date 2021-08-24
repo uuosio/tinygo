@@ -488,6 +488,12 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 			return errors.New("could not find wasi-libc, perhaps you need to run `make wasi-libc`?")
 		}
 		ldflags = append(ldflags, path)
+	case "wasi-libc-eosio":
+		path := filepath.Join(root, "lib/wasi-libc-eosio/sysroot/lib/wasm32-wasi/libc.a")
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return errors.New("could not find wasi-libc-eosio, perhaps you need to run `make wasi-libc-eosio`?")
+		}
+		ldflags = append(ldflags, path)
 	case "":
 		// no library specified, so nothing to do
 	default:
