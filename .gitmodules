@@ -16,10 +16,16 @@
 	branch = release_80
 [submodule "lib/wasi-libc"]
 	path = lib/wasi-libc
-	url = https://github.com/CraneStation/wasi-libc
+	url = https://github.com/WebAssembly/wasi-libc
 [submodule "lib/picolibc"]
 	path = lib/picolibc
 	url = https://github.com/keith-packard/picolibc.git
 [submodule "lib/stm32-svd"]
 	path = lib/stm32-svd
 	url = https://github.com/tinygo-org/stm32-svd
+[submodule "lib/wasi-libc-eosio"]
+	path = lib/wasi-libc-eosio
+	url = https://github.com/learnforpractice/wasi-libc-private
+[submodule "src/chain"]
+	path = src/chain
+	url = https://github.com/uuosio/go-chain
