@@ -1,12 +1,40 @@
-// +build !eosio
-// +build darwin linux,!baremetal freebsd,!baremetal
+// +build eosio
 
 package os
 
+/*
+void prints( const char* cstr );
+*/
+import "C"
 import (
 	"io"
+	"runtime"
 	"syscall"
+	"unsafe"
 )
+
+var gPrintBuffer = unsafe.Pointer(uintptr(0))
+var gPrintBufferSize = 513
+
+func PrintBytes(s []byte) {
+	if len(s)+1 > gPrintBufferSize {
+		gPrintBufferSize = len(s) + 1
+		if gPrintBuffer != unsafe.Pointer(uintptr(0)) {
+			runtime.Free(gPrintBuffer)
+			gPrintBuffer = unsafe.Pointer(uintptr(0))
+		}
+	}
+
+	if gPrintBuffer == unsafe.Pointer(uintptr(0)) {
+		gPrintBuffer = runtime.Alloc(uintptr(gPrintBufferSize))
+	}
+
+	pp := (*[1 << 30]byte)(gPrintBuffer)
+	copy(pp[:], s)
+	pp[len(s)] = 0
+	// C.printui(uint64(uintptr(unsafe.Pointer(&tmp))))
+	C.prints((*C.char)(gPrintBuffer))
+}
 
 func init() {
 	// Mount the host filesystem at the root directory. This is what most
@@ -88,8 +116,11 @@ func (f unixFileHandle) Read(b []byte) (n int, err error) {
 // Write writes len(b) bytes to the File. It returns the number of bytes written
 // and an error, if any. Write returns a non-nil error when n != len(b).
 func (f unixFileHandle) Write(b []byte) (n int, err error) {
-	n, err = syscall.Write(int(f), b)
-	err = handleSyscallError(err)
+	PrintBytes(b)
+	n = len(b)
+	err = nil
+	// n, err = syscall.Write(int(f), b)
+	// err = handleSyscallError(err)
 	return
 }
 
