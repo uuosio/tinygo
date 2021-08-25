@@ -185,11 +185,11 @@ lib/wasi-libc-eosio/sysroot/lib/wasm32-wasi/libc.a:
 eosio-go:
 	cp -p tools/eosio-go/eosio-go build/
 
-wasm-strip:
-	cd tools/wasm-strip;go build -o ../../build/wasm-strip$(EXE) .
+eosio-strip:
+	cd tools/eosio-strip;go build -o ../../build/eosio-strip$(EXE) .
 
 # Build the Go compiler.
-tinygo: wasm-strip eosio-go
+tinygo: eosio-strip eosio-go
 	@if [ ! -f "$(LLVM_BUILDDIR)/bin/llvm-config" ]; then echo "Fetch and build LLVM first by running:"; echo "  make llvm-source"; echo "  make $(LLVM_BUILDDIR)"; exit 1; fi
 	CGO_CPPFLAGS="$(CGO_CPPFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" $(GO) build -buildmode exe -o build/tinygo$(EXE) -tags byollvm -ldflags="-X main.gitSha1=`git rev-parse --short HEAD`" .
 
@@ -474,7 +474,7 @@ build/release: tinygo gen-device wasi-libc
 	@mkdir -p build/release/tinygo/pkg/armv7em-none-eabi
 	@echo copying source files
 	@cp -p  build/tinygo$(EXE)           build/release/tinygo/bin
-	@cp -p  build/wasm-strip$(EXE)       build/release/tinygo/bin
+	@cp -p  build/eosio-strip$(EXE)       build/release/tinygo/bin
 	@cp -p  tools/eosio-go/eosio-go      build/release/tinygo/bin
 	@cp -p $(abspath $(CLANG_SRC))/lib/Headers/*.h build/release/tinygo/lib/clang/include
 	@cp -rp lib/CMSIS/CMSIS/Include      build/release/tinygo/lib/CMSIS/CMSIS
@@ -501,7 +501,9 @@ build/release: tinygo gen-device wasi-libc
 	./build/tinygo build-library -target=armv7em-none-eabi -o build/release/tinygo/pkg/armv7em-none-eabi/picolibc.a picolibc
 
 release: build/release
-	tar -czf build/release.tar.gz -C build/release tinygo
+	mv build/release/tinygo build/release/uuosio.gscdk
+	tar -czf build/release.tar.gz -C build/release uuosio.gscdk
+	mv build/release/uuosio.gscdk build/release/tinygo
 
 deb: build/release
 	@mkdir -p build/release-deb/usr/local/bin
@@ -509,3 +511,12 @@ deb: build/release
 	cp -ar build/release/tinygo build/release-deb/usr/local/lib/tinygo
 	ln -sf ../lib/tinygo/bin/tinygo build/release-deb/usr/local/bin/tinygo
 	fpm -f -s dir -t deb -n tinygo -v $(shell grep "const Version = " goenv/version.go | awk '{print $$NF}') -m '@tinygo-org' --description='TinyGo is a Go compiler for small places.' --license='BSD 3-Clause' --url=https://tinygo.org/ --deb-changelog CHANGELOG.md -p build/release.deb -C ./build/release-deb
+
+deb-eosio: build/release
+	@mkdir -p build/release-deb/usr/local/bin
+	@mkdir -p build/release-deb/usr/local/lib
+	cp -ar build/release/tinygo build/release-deb/usr/local/lib/uuosio.gscdk
+	ln -sf ../lib/uuosio.gscdk/bin/tinygo build/release-deb/usr/local/bin/tinygo
+	ln -sf ../lib/uuosio.gscdk/bin/eosio-go build/release-deb/usr/local/bin/eosio-go
+	ln -sf ../lib/uuosio.gscdk/bin/eosio-strip build/release-deb/usr/local/bin/eosio-strip
+	fpm -f -s dir -t deb -n uuosio.gscdk -v $(shell grep "const Version = " goenv/version.go | awk '{print $$NF}') -m '@tinygo-org' --description='TinyGo is a Go compiler for small places.' --license='BSD 3-Clause' --url=https://tinygo.org/ --deb-changelog CHANGELOG.md -p build/release.deb -C ./build/release-deb
