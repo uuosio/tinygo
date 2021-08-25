@@ -123,7 +123,43 @@ func NameToString(value uint64) string {
 	return string(str[:i+1])
 }
 
-func convertToAbiType(goType string) string {
+func abiTypes() []string {
+	return []string{
+		"bool",
+		"int8",
+		"uint8",
+		"int16",
+		"uint16",
+		"int32",
+		"uint32",
+		"int64",
+		"uint64",
+		"int128",
+		"uint128",
+		"varint32",
+		"varuint32",
+		"float32",
+		"float64",
+		"float128",
+		"time_point",
+		"time_point_sec",
+		"block_timestamp_type",
+		"name",
+		"bytes",
+		"string",
+		"checksum160",
+		"checksum256",
+		"checksum512",
+		"public_key",
+		"signature",
+		"symbol",
+		"symbol_code",
+		"asset",
+		"extended_asset",
+	}
+}
+
+func _convertToAbiType(goType string) string {
 	switch goType {
 	case "int":
 		return "int32"
@@ -143,6 +179,8 @@ func convertToAbiType(goType string) string {
 		return "checksum160"
 	case "chain.Checksum256":
 		return "checksum256"
+	case "chain.Uint256":
+		return "checksum256"
 	case "chain.Checksum512":
 		return "checksum512"
 	case "chain.PublicKey":
@@ -160,17 +198,6 @@ func convertToAbiType(goType string) string {
 	default:
 		return goType
 	}
-}
-
-func convertType(goType MemberType) string {
-	abiType := convertToAbiType(goType.Type)
-	if goType.IsArray {
-		if abiType == "byte" {
-			return "bytes"
-		}
-		return "[]" + abiType
-	}
-	return abiType
 }
 
 type MemberType struct {
@@ -206,6 +233,7 @@ type CodeGenerator struct {
 	actionMap          map[string]bool
 	contractStructName string
 	hasNewContractFunc bool
+	abiTypeMap         map[string]bool
 }
 
 type ABITable struct {
@@ -257,7 +285,40 @@ type ABI struct {
 func NewCodeGenerator() *CodeGenerator {
 	t := &CodeGenerator{}
 	t.actionMap = make(map[string]bool)
+	t.abiTypeMap = make(map[string]bool)
+	for _, abiType := range abiTypes() {
+		t.abiTypeMap[abiType] = true
+	}
 	return t
+}
+
+func (t *CodeGenerator) convertToAbiType(goType string) (string, error) {
+	abiType := _convertToAbiType(goType)
+	if _, ok := t.abiTypeMap[abiType]; ok {
+		return abiType, nil
+	}
+
+	// check if type is a abi struct
+	if _, ok := t.abiStructsMap[goType]; ok {
+		return goType, nil
+	}
+
+	return "", fmt.Errorf("type %s can not be converted to an ABI type", goType)
+}
+
+func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
+	abiType, err := t.convertToAbiType(goType.Type)
+	if err != nil {
+		return "", err
+	}
+
+	if goType.IsArray {
+		if abiType == "byte" {
+			return "bytes", nil
+		}
+		return "[]" + abiType, nil
+	}
+	return abiType, nil
 }
 
 func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
@@ -819,10 +880,10 @@ func (t *CodeGenerator) genSizeCode(structName string, members []MemberType) {
 	t.writeCode("}")
 }
 
-func (t *CodeGenerator) GenCode() {
+func (t *CodeGenerator) GenCode() error {
 	f, err := os.Create(t.DirName + "/generated.go")
 	if err != nil {
-		panic(err)
+		return err
 	}
 	t.codeFile = f
 
@@ -889,7 +950,7 @@ func dummy() {
 `)
 
 	if t.HasMainFunc {
-		return
+		return nil
 	}
 	t.writeCode("func main() {")
 	t.writeCode("    receiver, firstReceiver, action := chain.GetApplyArgs()")
@@ -905,9 +966,10 @@ func dummy() {
 	t.GenNotifyCode()
 	t.writeCode("    }")
 	t.writeCode("}\n")
+	return nil
 }
 
-func (t *CodeGenerator) GenAbi() {
+func (t *CodeGenerator) GenAbi() error {
 	var abiFile string
 	if t.contractName == "" {
 		abiFile = t.DirName + "/generated.abi"
@@ -939,7 +1001,11 @@ func (t *CodeGenerator) GenAbi() {
 		s.Base = ""
 		s.Fields = make([]ABIStructField, 0, len(_struct.Members))
 		for _, member := range _struct.Members {
-			field := ABIStructField{Name: member.Name, Type: convertToAbiType(member.Type)}
+			abiType, err := t.convertType(member)
+			if err != nil {
+				return err
+			}
+			field := ABIStructField{Name: member.Name, Type: abiType}
 			s.Fields = append(s.Fields, field)
 		}
 		abi.Structs = append(abi.Structs, s)
@@ -951,7 +1017,11 @@ func (t *CodeGenerator) GenAbi() {
 		s.Base = ""
 		s.Fields = make([]ABIStructField, 0, len(action.Members))
 		for _, member := range action.Members {
-			field := ABIStructField{Name: member.Name, Type: convertToAbiType(member.Type)}
+			abiType, err := t.convertType(member)
+			if err != nil {
+				return err
+			}
+			field := ABIStructField{Name: member.Name, Type: abiType}
 			s.Fields = append(s.Fields, field)
 		}
 		abi.Structs = append(abi.Structs, s)
@@ -985,6 +1055,7 @@ func (t *CodeGenerator) GenAbi() {
 	}
 	f.Write(result)
 	f.Close()
+	return nil
 }
 
 func (t *CodeGenerator) FetchAllGoFiles(dir string) []string {
@@ -1097,8 +1168,12 @@ func GenerateCode(inFile string) error {
 	// 	gen.StructMap[s.StructName] = s
 	// }
 	gen.Analyse()
-	gen.GenCode()
-	gen.GenAbi()
+	if err := gen.GenCode(); err != nil {
+		return err
+	}
+	if err := gen.GenAbi(); err != nil {
+		return err
+	}
 	gen.Finish()
 	return nil
 }
