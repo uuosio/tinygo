@@ -795,11 +795,11 @@ func (t *CodeGenerator) calcArrayMemberSize(name string, goType string, indent s
 		fmt.Fprintf(&buf, "    for i := range t.%s {\n", name)
 		fmt.Fprintf(&buf, "        var v interface{} = &t.%s[i]\n", name)
 		fmt.Fprintf(&buf, "        if vv, ok := v.(chain.StructSize); ok {\n")
-		fmt.Fprintf(&buf, indent + "            size += vv.Size()\n")
+		fmt.Fprintf(&buf, indent+"            size += vv.Size()\n")
 		fmt.Fprintf(&buf, "        } else {\n")
-		fmt.Fprintf(&buf, indent + "            size += int(unsafe.Sizeof(t.%s[i]))\n", name)
-		fmt.Fprintf(&buf, indent + "        }\n")
-		fmt.Fprintf(&buf, indent + "    }\n")
+		fmt.Fprintf(&buf, indent+"            size += int(unsafe.Sizeof(t.%s[i]))\n", name)
+		fmt.Fprintf(&buf, indent+"        }\n")
+		fmt.Fprintf(&buf, indent+"    }\n")
 		t.writeCode(buf.String())
 	}
 }
@@ -833,6 +833,7 @@ func (t *CodeGenerator) GenCode() {
 	t.writeCode("package main\n")
 	t.writeCode("import \"chain\"\n")
 	t.writeCode("import \"unsafe\"\n")
+	t.writeCode("import \"chain/database\"\n")
 
 	for _, action := range t.Actions {
 		t.genStruct(action.ActionName, action.Members)
@@ -849,6 +850,32 @@ func (t *CodeGenerator) GenCode() {
 		t.genSizeCode(_struct.StructName, _struct.Members)
 	}
 
+	for _, table := range t.Structs {
+		if table.TableName == "" {
+			continue
+		}
+
+		t.writeCode(`
+func %sUnpacker(buf []byte) (database.DBValue, error) {
+	v := &%s{}
+	_, err := v.Unpack(buf)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+		`, table.StructName, table.StructName)
+		t.writeCode(`
+func New%sDB(code, scope chain.Name, idxTypes []int) *database.MultiIndex {
+	table := chain.Name{uint64(%d)}
+	return database.NewMultiIndex(code, scope, table, idxTypes, %sUnpacker)
+}		
+		`,
+			table.StructName,
+			StringToName(table.TableName),
+			table.StructName)
+	}
+
 	t.writeCode(`
 //eliminate unused package errors
 func dummy() {
@@ -856,6 +883,7 @@ func dummy() {
 		v := 0;
 		n := unsafe.Sizeof(v);
 		chain.Printui(uint64(n));
+		chain.Printui(database.IDX64);
 	}
 }
 `)
