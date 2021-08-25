@@ -182,11 +182,14 @@ lib/wasi-libc-eosio/sysroot/lib/wasm32-wasi/libc.a:
 	@if [ ! -e lib/wasi-libc-eosio/Makefile ]; then echo "Submodules have not been downloaded. Please download them using:\n  git submodule update --init"; exit 1; fi
 	cd lib/wasi-libc-eosio && make -j4 WASM_CC=$(CLANG) WASM_AR=$(LLVM_AR) WASM_NM=$(LLVM_NM)
 
+eosio-go:
+	cp -p tools/eosio-go/eosio-go build/
+
 wasm-strip:
 	cd tools/wasm-strip;go build -o ../../build/wasm-strip$(EXE) .
 
 # Build the Go compiler.
-tinygo: wasm-strip
+tinygo: wasm-strip eosio-go
 	@if [ ! -f "$(LLVM_BUILDDIR)/bin/llvm-config" ]; then echo "Fetch and build LLVM first by running:"; echo "  make llvm-source"; echo "  make $(LLVM_BUILDDIR)"; exit 1; fi
 	CGO_CPPFLAGS="$(CGO_CPPFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" $(GO) build -buildmode exe -o build/tinygo$(EXE) -tags byollvm -ldflags="-X main.gitSha1=`git rev-parse --short HEAD`" .
 
@@ -472,6 +475,7 @@ build/release: tinygo gen-device wasi-libc
 	@echo copying source files
 	@cp -p  build/tinygo$(EXE)           build/release/tinygo/bin
 	@cp -p  build/wasm-strip$(EXE)       build/release/tinygo/bin
+	@cp -p  tools/eosio-go/eosio-go      build/release/tinygo/bin
 	@cp -p $(abspath $(CLANG_SRC))/lib/Headers/*.h build/release/tinygo/lib/clang/include
 	@cp -rp lib/CMSIS/CMSIS/Include      build/release/tinygo/lib/CMSIS/CMSIS
 	@cp -rp lib/CMSIS/README.md          build/release/tinygo/lib/CMSIS
