@@ -1046,6 +1046,17 @@ func (t *CodeGenerator) Analyse() {
 			}
 		}
 	}
+
+	for _, item := range t.Structs {
+		if item.TableName == "" {
+			continue
+		}
+
+		item2, ok := structMap[item.StructName]
+		if ok {
+			t.abiStructsMap[item.StructName] = item2
+		}
+	}
 }
 
 func GenerateCode(inFile string) error {
