@@ -515,7 +515,7 @@ deb: build/release
 deb-eosio: build/release
 	@mkdir -p build/release-deb/usr/local/bin
 	@mkdir -p build/release-deb/usr/local/lib
-	cp -ar build/release/tinygo build/release-deb/usr/local/lib/uuosio.gscdk
+	cp -ar build/release/tinygo/ build/release-deb/usr/local/lib/uuosio.gscdk/
 	ln -sf ../lib/uuosio.gscdk/bin/tinygo build/release-deb/usr/local/bin/tinygo
 	ln -sf ../lib/uuosio.gscdk/bin/eosio-go build/release-deb/usr/local/bin/eosio-go
 	ln -sf ../lib/uuosio.gscdk/bin/eosio-strip build/release-deb/usr/local/bin/eosio-strip
