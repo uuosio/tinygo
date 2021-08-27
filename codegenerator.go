@@ -214,12 +214,19 @@ type ActionInfo struct {
 	IsNotify   bool
 }
 
+type SecondaryIndexInfo struct {
+	Type   string
+	Setter string
+	Getter string
+}
+
 type StructInfo struct {
-	PackageName string
-	TableName   string
-	StructName  string
-	Comment     string
-	Members     []MemberType
+	PackageName      string
+	TableName        string
+	StructName       string
+	Comment          string
+	SecondaryIndexes []SecondaryIndexInfo
+	Members          []MemberType
 }
 
 type CodeGenerator struct {
@@ -234,6 +241,7 @@ type CodeGenerator struct {
 	contractStructName string
 	hasNewContractFunc bool
 	abiTypeMap         map[string]bool
+	indexTypeMap       map[string]bool
 }
 
 type ABITable struct {
@@ -286,9 +294,15 @@ func NewCodeGenerator() *CodeGenerator {
 	t := &CodeGenerator{}
 	t.actionMap = make(map[string]bool)
 	t.abiTypeMap = make(map[string]bool)
+	t.indexTypeMap = make(map[string]bool)
 	for _, abiType := range abiTypes() {
 		t.abiTypeMap[abiType] = true
 	}
+
+	for _, indexType := range []string{"IDX64", "IDX128", "IDX256", "IDXFloat64", "IDXFloat128"} {
+		t.indexTypeMap[indexType] = true
+	}
+
 	return t
 }
 
@@ -374,6 +388,18 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 			//*ast.FuncType *ast.Ident
 			//TODO panic on FuncType
 			// log.Printf("++++field.Type: %T %v %v", field.Type, field.Type, field.Names)
+			if info.TableName != "" && field.Comment != nil {
+				comment := field.Comment.List[0]
+				indexInfo := strings.Split(comment.Text, ":")
+				if len(indexInfo) == 3 {
+					idx := indexInfo[0][2:]
+					if _, ok := t.indexTypeMap[idx]; ok {
+						indexInfo := SecondaryIndexInfo{idx, indexInfo[1], indexInfo[2]}
+						info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
+					}
+				}
+			}
+
 			switch fieldType := field.Type.(type) {
 			case *ast.Ident:
 				if field.Names != nil {
@@ -413,8 +439,17 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 							return errors.New(errMsg)
 						}
 					}
+				case *ast.SelectorExpr:
+					ident := v.X.(*ast.Ident)
+					for _, name := range field.Names {
+						member := MemberType{}
+						member.Name = name.Name
+						member.Type = ident.Name + "." + v.Sel.Name
+						member.IsArray = true
+						info.Members = append(info.Members, member)
+					}
 				default:
-					errMsg := fmt.Sprintf("unsupported type: %T in %s", fieldType, info.StructName)
+					errMsg := fmt.Sprintf("unsupported type: %T %s.%v", v, info.StructName, field.Names)
 					return errors.New(errMsg)
 				}
 				//				ident := fieldType.Elt.(*ast.Ident)
@@ -880,6 +915,23 @@ func (t *CodeGenerator) genSizeCode(structName string, members []MemberType) {
 	t.writeCode("}")
 }
 
+func GetIndexType(index string) string {
+	switch index {
+	case "IDX64":
+		return "uint64"
+	case "IDX128":
+		return "chain.Uint128"
+	case "IDX256":
+		return "chain.Uint256"
+	case "IDXFloat64":
+		return "float64"
+	case "IDXFloat128":
+		return "chain.Float128"
+	default:
+		panic(fmt.Sprintf("unknown secondary index type: %s", index))
+	}
+}
+
 func (t *CodeGenerator) GenCode() error {
 	f, err := os.Create(t.DirName + "/generated.go")
 	if err != nil {
@@ -911,10 +963,54 @@ func (t *CodeGenerator) GenCode() error {
 		t.genSizeCode(_struct.StructName, _struct.Members)
 	}
 
-	for _, table := range t.Structs {
+	for i := range t.Structs {
+		table := &t.Structs[i]
 		if table.TableName == "" {
 			continue
 		}
+
+		if len(table.SecondaryIndexes) > 0 {
+			indexes := ""
+			for _, index := range table.SecondaryIndexes {
+				indexes += fmt.Sprintf("database.%s,", index.Type)
+			}
+
+			t.writeCode(`
+var (
+	%sSecondaryTypes = []int{
+		%s
+	}
+)`, table.StructName, indexes)
+
+		}
+
+		t.writeCode(`
+func (target *%s) GetSecondaryValue(index int) interface{} {
+	switch index {`, table.StructName)
+
+		for i, index := range table.SecondaryIndexes {
+			t.writeCode(`    case %d:
+		return %s`, i, index.Getter)
+
+		}
+		t.writeCode(`	default:
+		panic("index out of bound")
+	}
+}
+`)
+
+		t.writeCode(`
+func (target *%s) SetSecondaryValue(index int, v interface{}) {
+	switch index {`, table.StructName)
+		for i, index := range table.SecondaryIndexes {
+			t.writeCode(`    case %d:`, i)
+			t.writeCode(`        %s = v.(%s)`, index.Setter, GetIndexType(index.Type))
+		}
+
+		t.writeCode(`	default:
+			panic("unknown index")
+		}
+	}`)
 
 		t.writeCode(`
 func %sUnpacker(buf []byte) (database.DBValue, error) {
@@ -927,13 +1023,14 @@ func %sUnpacker(buf []byte) (database.DBValue, error) {
 }
 		`, table.StructName, table.StructName)
 		t.writeCode(`
-func New%sDB(code, scope chain.Name, idxTypes []int) *database.MultiIndex {
+func New%sDB(code, scope chain.Name) *database.MultiIndex {
 	table := chain.Name{uint64(%d)}
-	return database.NewMultiIndex(code, scope, table, idxTypes, %sUnpacker)
+	return database.NewMultiIndex(code, scope, table, %sSecondaryTypes, %sUnpacker)
 }		
 		`,
 			table.StructName,
 			StringToName(table.TableName),
+			table.StructName,
 			table.StructName)
 	}
 
