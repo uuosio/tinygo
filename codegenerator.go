@@ -260,15 +260,6 @@ type ABIAction struct {
 	RicardianContract string `json:"ricardian_contract"`
 }
 
-// "name": "account",
-// "base": "",
-// "fields": [
-// 	{
-// 		"name": "balance",
-// 		"type": "asset"
-// 	}
-// ]
-
 type ABIStructField struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
@@ -378,7 +369,6 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 		if isContractStruct {
 			t.contractStructName = name
 		}
-		// log.Printf("+++++parse struct: %s\n", name)
 
 		vv, ok := v.Type.(*ast.StructType)
 		if !ok {
@@ -389,15 +379,14 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 		for _, field := range vv.Fields.List {
 			//*ast.FuncType *ast.Ident
 			//TODO panic on FuncType
-			// log.Printf("++++field.Type: %T %v %v", field.Type, field.Type, field.Names)
 			if info.TableName != "" && field.Comment != nil {
 				comment := field.Comment.List[0]
 				text := strings.TrimSpace(comment.Text)
 				indexInfo := strings.Split(text, ":")
+				//parse comment like://primary:t.primary
 				if len(indexInfo) == 2 && indexInfo[0] == "//primary" {
 					info.PrimaryKey = indexInfo[1]
-					//primary:target.primary
-				} else if len(indexInfo) == 3 {
+				} else if len(indexInfo) == 3 { //parse comment: //IDX64:t.Account.N:t.Account.N=%v
 					idx := indexInfo[0][2:]
 					if _, ok := t.indexTypeMap[idx]; ok {
 						getter := strings.TrimSpace(indexInfo[1])
@@ -405,7 +394,7 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 						indexInfo := SecondaryIndexInfo{idx, "", getter, setter}
 						info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
 					}
-				} else if len(indexInfo) == 4 {
+				} else if len(indexInfo) == 4 { //parse comment: //IDX64:byaccount:t.Account.N:t.Account.N=%v
 					idx := indexInfo[0][2:]
 					if _, ok := t.indexTypeMap[idx]; ok {
 						name := strings.TrimSpace(indexInfo[1])
@@ -469,11 +458,8 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 					errMsg := fmt.Sprintf("unsupported type: %T %s.%v", v, info.StructName, field.Names)
 					return errors.New(errMsg)
 				}
-				//				ident := fieldType.Elt.(*ast.Ident)
-
 			case *ast.SelectorExpr:
 				ident := fieldType.X.(*ast.Ident)
-				// log.Println("++++++++SelectorExpr:", ident.Name, expr.Sel.Name)
 				for _, name := range field.Names {
 					member := MemberType{}
 					member.Name = name.Name
@@ -501,9 +487,6 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				s := fmt.Sprintf("Unsupported field: %v in struct: %s", field.Names, name)
 				panic(s)
 			}
-			//ident.Obj: ast.Object
-			// log.Printf("++++field type: %s %T\n", typeIdent.Name, typeIdent.Obj)
-			// log.Println("++++field comment:", field.Comment, field.Doc)
 		}
 		t.Structs = append(t.Structs, info)
 	}
@@ -515,7 +498,6 @@ func IsNameValid(name string) bool {
 }
 
 func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
-	// log.Println("func:", f.Name)
 	if f.Name.Name == "main" {
 		t.HasMainFunc = true
 	} else if f.Name.Name == "NewContract" {
@@ -525,15 +507,9 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	if f.Doc == nil {
 		return nil
 	}
-	// for _, v := range f.Doc.List {
-	// 	log.Printf("+++++++Doc:%s\n", v.Text)
-	// }
 	n := len(f.Doc.List)
 	doc := f.Doc.List[n-1].Text
 	doc = strings.TrimSpace(doc)
-	// if !strings.HasPrefix(doc, "//table") {
-	//     return
-	// }
 
 	items := Split(doc)
 	if len(items) != 2 {
@@ -568,16 +544,11 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	if f.Recv.List != nil {
 		for _, v := range f.Recv.List {
 			expr := v.Type.(*ast.StarExpr)
-			// log.Printf("+++%v %T\n", expr.X, expr.X)
 			ident := expr.X.(*ast.Ident)
-			// log.Printf("+++%s %T\n", ident.Name, ident.Obj)
 			if ident.Obj != nil {
 				obj := ident.Obj
 				action.StructName = obj.Name
-				// log.Printf("+++obj: %s %v %T %T %T\n", obj.Name, obj.Kind, obj.Decl, obj.Data, obj.Type)
-				//                obj.Decl.(*ast.TypeSpec)
 			}
-			// log.Printf("+++%v %v %v\n", expr, expr.X, v.Names)
 		}
 	}
 
@@ -591,7 +562,6 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 				member.Type = ident.Name
 				action.Members = append(action.Members, member)
 			}
-			// log.Printf("++++%s\n", ident.Name)
 		case *ast.ArrayType:
 			ident := expr.Elt.(*ast.Ident)
 			for _, name := range v.Names {
@@ -601,10 +571,8 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 				member.IsArray = true
 				action.Members = append(action.Members, member)
 			}
-			// log.Printf("+++++++ArrayType: %v %v\n", ident.Name, ident.Obj)
 		case *ast.SelectorExpr:
 			ident := expr.X.(*ast.Ident)
-			// log.Println("++++++++SelectorExpr:", ident.Name, expr.Sel.Name)
 			for _, name := range v.Names {
 				member := MemberType{}
 				member.Name = name.Name
@@ -615,7 +583,6 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 		default:
 			panic("unknown type:" + fmt.Sprintf("%T", expr))
 		}
-		// log.Printf("+++++++++param:%v %v %T\n", v.Names, v.Type, v.Type)
 	}
 	t.Actions = append(t.Actions, action)
 	return nil
@@ -623,6 +590,7 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 
 func (t *CodeGenerator) ParseGoFile(goFile string) error {
 	fset := token.NewFileSet()
+
 	file, err := parser.ParseFile(fset, goFile, nil, parser.ParseComments)
 	if err != nil {
 		return err
@@ -635,15 +603,12 @@ func (t *CodeGenerator) ParseGoFile(goFile string) error {
 	log.Println("parse file:", goFile)
 
 	for _, decl := range file.Decls {
-		// log.Println("-------------------------------")
-		// log.Printf("+++type: %T\n", decl)
 		switch v := decl.(type) {
 		case *ast.FuncDecl:
 			if err := t.parseFunc(v); err != nil {
 				return err
 			}
 		case *ast.GenDecl:
-			// log.Println("+++v.Tok", v.Tok)
 			if err := t.parseStruct(file.Name.Name, v); err != nil {
 				return err
 			}
@@ -970,10 +935,8 @@ func (t *CodeGenerator) GenCode() error {
 		t.genPackCode(action.ActionName, action.Members)
 		t.genUnpackCode(action.ActionName, action.Members)
 		t.genSizeCode(action.ActionName, action.Members)
-		//        log.Println("++action:", action)
 	}
 
-	//	for _, _struct := range t.abiStructsMap {
 	for _, _struct := range t.Structs {
 		t.genPackCode(_struct.StructName, _struct.Members)
 		t.genUnpackCode(_struct.StructName, _struct.Members)
@@ -1031,8 +994,7 @@ func (t *%s) GetSecondaryValue(index int) interface{} {
 		t.writeCode(`	default:
 		panic("index out of bound")
 	}
-}
-`)
+}`)
 
 		t.writeCode(`
 func (t *%s) SetSecondaryValue(index int, v interface{}) {
@@ -1040,13 +1002,17 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 		for i, index := range table.SecondaryIndexes {
 			t.writeCode(`    case %d:`, i)
 			value := fmt.Sprintf("v.(%s)", GetIndexType(index.Type))
-			t.writeCode(fmt.Sprintf("        "+index.Setter, value))
+			if strings.Index(index.Setter, "%v") >= 0 {
+				t.writeCode(fmt.Sprintf("        "+index.Setter, value))
+			} else {
+				t.writeCode(fmt.Sprintf("        %s=%s", index.Setter, value))
+			}
 		}
 
 		t.writeCode(`	default:
 			panic("unknown index")
 		}
-	}`)
+}`)
 
 		t.writeCode(`
 func %sUnpacker(buf []byte) (database.DBValue, error) {
@@ -1056,14 +1022,13 @@ func %sUnpacker(buf []byte) (database.DBValue, error) {
 		return nil, err
 	}
 	return v, nil
-}
-		`, table.StructName, table.StructName)
+}`, table.StructName, table.StructName)
+
 		t.writeCode(`
 func New%sDB(code, scope chain.Name) *database.MultiIndex {
-	table := chain.Name{uint64(%d)}
+	table := chain.Name{N:uint64(%d)}
 	return database.NewMultiIndex(code, scope, table, %sDBNameToIndex, %sSecondaryTypes, %sUnpacker)
-}		
-		`,
+}`,
 			table.StructName,
 			StringToName(table.TableName),
 			table.StructName,
@@ -1080,8 +1045,7 @@ func dummy() {
 		chain.Printui(uint64(n));
 		chain.Printui(database.IDX64);
 	}
-}
-`)
+}`)
 
 	if t.HasMainFunc {
 		return nil
@@ -1130,7 +1094,6 @@ func (t *CodeGenerator) GenAbi() error {
 
 	for _, _struct := range t.abiStructsMap {
 		s := ABIStruct{}
-		// log.Println("+++abi struct", _struct.StructName)
 		s.Name = _struct.StructName
 		s.Base = ""
 		s.Fields = make([]ABIStructField, 0, len(_struct.Members))
@@ -1266,8 +1229,6 @@ func (t *CodeGenerator) Analyse() {
 
 func GenerateCode(inFile string) error {
 	gen := NewCodeGenerator()
-
-	//	inFile := os.Args[1]
 	if filepath.Ext(inFile) == ".go" {
 		ext := filepath.Ext(inFile)
 		if ext == ".go" {
@@ -1293,14 +1254,6 @@ func GenerateCode(inFile string) error {
 		}
 	}
 
-	//TODO: generate Pack/Unpack referenced by table struct
-	//TODO: generate Pack/Unpack referenced by action
-	//TODO: Add struct to ABI referenced by table struct or action
-	// gen.StructMap = make(map[string]*StructInfo)
-	// for i := range gen.Structs {
-	// 	s := &gen.Structs[i]
-	// 	gen.StructMap[s.StructName] = s
-	// }
 	gen.Analyse()
 	if err := gen.GenCode(); err != nil {
 		return err
