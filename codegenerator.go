@@ -892,9 +892,9 @@ func (t *CodeGenerator) GenCode() error {
 	}
 
 	t.writeCode("package main\n")
-	t.writeCode("import \"chain\"\n")
+	t.writeCode("import \"github.com/uuosio/chain\"\n")
+	t.writeCode("import \"github.com/uuosio/chain/database\"\n")
 	t.writeCode("import \"unsafe\"\n")
-	t.writeCode("import \"chain/database\"\n")
 
 	for _, action := range t.Actions {
 		t.genStruct(action.ActionName, action.Members)
