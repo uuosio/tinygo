@@ -216,8 +216,9 @@ type ActionInfo struct {
 
 type SecondaryIndexInfo struct {
 	Type   string
-	Setter string
+	Name   string
 	Getter string
+	Setter string
 }
 
 type StructInfo struct {
@@ -399,7 +400,18 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				} else if len(indexInfo) == 3 {
 					idx := indexInfo[0][2:]
 					if _, ok := t.indexTypeMap[idx]; ok {
-						indexInfo := SecondaryIndexInfo{idx, indexInfo[1], indexInfo[2]}
+						getter := strings.TrimSpace(indexInfo[1])
+						setter := strings.TrimSpace(indexInfo[2])
+						indexInfo := SecondaryIndexInfo{idx, "", getter, setter}
+						info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
+					}
+				} else if len(indexInfo) == 4 {
+					idx := indexInfo[0][2:]
+					if _, ok := t.indexTypeMap[idx]; ok {
+						name := strings.TrimSpace(indexInfo[1])
+						getter := strings.TrimSpace(indexInfo[2])
+						setter := strings.TrimSpace(indexInfo[3])
+						indexInfo := SecondaryIndexInfo{idx, name, getter, setter}
 						info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
 					}
 				}
@@ -975,28 +987,40 @@ func (t *CodeGenerator) GenCode() error {
 		}
 
 		if table.PrimaryKey != "" {
-			t.writeCode("func (target *%s) GetPrimary() uint64 {", table.StructName)
+			t.writeCode("func (t *%s) GetPrimary() uint64 {", table.StructName)
 			t.writeCode("    return %s", table.PrimaryKey)
 			t.writeCode("}")
 		}
 
-		if len(table.SecondaryIndexes) > 0 {
-			indexes := ""
-			for _, index := range table.SecondaryIndexes {
-				indexes += fmt.Sprintf("database.%s,", index.Type)
-			}
-
-			t.writeCode(`
-var (
-	%sSecondaryTypes = []int{
-		%s
-	}
-)`, table.StructName, indexes)
-
+		indexes := ""
+		for _, index := range table.SecondaryIndexes {
+			indexes += fmt.Sprintf("database.%s,", index.Type)
 		}
 
 		t.writeCode(`
-func (target *%s) GetSecondaryValue(index int) interface{} {
+func %sDBNameToIndex(indexName string) int {
+	switch indexName {`, table.StructName)
+
+		for i, index := range table.SecondaryIndexes {
+			if index.Name != "" {
+				t.writeCode(`	case "%s":`, index.Name)
+				t.writeCode(`	    return %d`, i)
+			}
+		}
+
+		t.writeCode(`	default:
+		panic("unknow indexName")
+	}
+}`)
+
+		t.writeCode("var (\n	%sSecondaryTypes = []int{", table.StructName)
+		for _, index := range table.SecondaryIndexes {
+			t.writeCode("        database.%s,", index.Type)
+		}
+		t.writeCode("})")
+
+		t.writeCode(`
+func (t *%s) GetSecondaryValue(index int) interface{} {
 	switch index {`, table.StructName)
 
 		for i, index := range table.SecondaryIndexes {
@@ -1011,11 +1035,12 @@ func (target *%s) GetSecondaryValue(index int) interface{} {
 `)
 
 		t.writeCode(`
-func (target *%s) SetSecondaryValue(index int, v interface{}) {
+func (t *%s) SetSecondaryValue(index int, v interface{}) {
 	switch index {`, table.StructName)
 		for i, index := range table.SecondaryIndexes {
 			t.writeCode(`    case %d:`, i)
-			t.writeCode(`        %s = v.(%s)`, index.Setter, GetIndexType(index.Type))
+			value := fmt.Sprintf("v.(%s)", GetIndexType(index.Type))
+			t.writeCode(fmt.Sprintf("        "+index.Setter, value))
 		}
 
 		t.writeCode(`	default:
@@ -1036,11 +1061,12 @@ func %sUnpacker(buf []byte) (database.DBValue, error) {
 		t.writeCode(`
 func New%sDB(code, scope chain.Name) *database.MultiIndex {
 	table := chain.Name{uint64(%d)}
-	return database.NewMultiIndex(code, scope, table, %sSecondaryTypes, %sUnpacker)
+	return database.NewMultiIndex(code, scope, table, %sDBNameToIndex, %sSecondaryTypes, %sUnpacker)
 }		
 		`,
 			table.StructName,
 			StringToName(table.TableName),
+			table.StructName,
 			table.StructName,
 			table.StructName)
 	}
