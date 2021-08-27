@@ -225,6 +225,7 @@ type StructInfo struct {
 	TableName        string
 	StructName       string
 	Comment          string
+	PrimaryKey       string
 	SecondaryIndexes []SecondaryIndexInfo
 	Members          []MemberType
 }
@@ -390,8 +391,12 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 			// log.Printf("++++field.Type: %T %v %v", field.Type, field.Type, field.Names)
 			if info.TableName != "" && field.Comment != nil {
 				comment := field.Comment.List[0]
-				indexInfo := strings.Split(comment.Text, ":")
-				if len(indexInfo) == 3 {
+				text := strings.TrimSpace(comment.Text)
+				indexInfo := strings.Split(text, ":")
+				if len(indexInfo) == 2 && indexInfo[0] == "//primary" {
+					info.PrimaryKey = indexInfo[1]
+					//primary:target.primary
+				} else if len(indexInfo) == 3 {
 					idx := indexInfo[0][2:]
 					if _, ok := t.indexTypeMap[idx]; ok {
 						indexInfo := SecondaryIndexInfo{idx, indexInfo[1], indexInfo[2]}
@@ -967,6 +972,12 @@ func (t *CodeGenerator) GenCode() error {
 		table := &t.Structs[i]
 		if table.TableName == "" {
 			continue
+		}
+
+		if table.PrimaryKey != "" {
+			t.writeCode("func (target *%s) GetPrimary() uint64 {", table.StructName)
+			t.writeCode("    return %s", table.PrimaryKey)
+			t.writeCode("}")
 		}
 
 		if len(table.SecondaryIndexes) > 0 {
