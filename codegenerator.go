@@ -708,12 +708,14 @@ func (t *CodeGenerator) packArrayType(goName string, goType string) {
 	if goType == "byte" {
 		t.writeCode("    enc.PackBytes(t.%s)", goName)
 	} else {
-		t.writeCode("{")
-		t.writeCode("    enc.PackLength(len(t.%s))", goName)
-		t.writeCode("    for _, v := range t.%s {", goName)
-		t.writeCode("        enc.Pack(&v)")
-		t.writeCode("    }")
-		t.writeCode("}")
+		t.writeCode(`
+{
+	enc.PackLength(len(t.%[1]s))
+	for _, v := range t.%[1]s {
+		enc.Pack(&v)
+	}
+}`, goName)
+
 	}
 }
 
@@ -778,7 +780,7 @@ func (t *CodeGenerator) genUnpackCode(structName string, members []MemberType) {
 	t.writeCode("    return dec.Pos(), nil\n}\n")
 }
 
-func (t *CodeGenerator) calcNotArrayMemberSize(name string, goType string, indent string) {
+func (t *CodeGenerator) calcNotArrayMemberSize(name string, goType string) {
 	var code string
 
 	switch goType {
@@ -821,19 +823,20 @@ func (t *CodeGenerator) calcNotArrayMemberSize(name string, goType string, inden
 	case "chain.Symbol":
 		code = "    size += 8"
 	default:
-		code = "{\n"
-		code += fmt.Sprintf("    var v interface{} = &t.%s\n", name)
-		code += fmt.Sprintf("    if vv, ok := v.(chain.StructSize); ok {\n")
-		code += indent + fmt.Sprintf("        size += vv.Size()\n")
-		code += indent + "    } else {\n"
-		code += indent + fmt.Sprintf("        size += int(unsafe.Sizeof(t.%s))\n", name)
-		code += indent + "    }\n"
-		code += "}\n"
+		code = fmt.Sprintf(`
+{
+	var v interface{} = &t.%[1]s
+	if vv, ok := v.(chain.StructSize); ok {
+		size += vv.Size()
+	} else {
+		size += int(unsafe.Sizeof(t.%[1]s))
 	}
-	t.writeCode(indent + code)
+}`, name)
+	}
+	t.writeCode(code)
 }
 
-func (t *CodeGenerator) calcArrayMemberSize(name string, goType string, indent string) {
+func (t *CodeGenerator) calcArrayMemberSize(name string, goType string) {
 	var code string
 
 	switch goType {
@@ -841,12 +844,12 @@ func (t *CodeGenerator) calcArrayMemberSize(name string, goType string, indent s
 		t.writeCode("    size += len(t.%s)", name)
 	case "[]byte":
 		code = fmt.Sprintf("    for i := range t.%s {\n", name)
-		code += indent + fmt.Sprintf("        size += chain.PackedSizeLength(uint32(len(t.%s[i]))) + len(t.%s[i])\n", name, name)
-		code += indent + "    }\n"
+		code += fmt.Sprintf("        size += chain.PackedSizeLength(uint32(len(t.%s[i]))) + len(t.%s[i])\n", name, name)
+		code += "    }\n"
 	case "string":
 		code = fmt.Sprintf("    for i := range t.%s {\n", name)
-		code += indent + fmt.Sprintf("        size += chain.PackedSizeLength(uint32(len(t.%s[i]))) + len(t.%s[i])\n", name, name)
-		code += indent + "    }\n"
+		code += fmt.Sprintf("        size += chain.PackedSizeLength(uint32(len(t.%s[i]))) + len(t.%s[i])\n", name, name)
+		code += "    }\n"
 		t.writeCode(code)
 	case "bool":
 		t.writeCode("    size += len(t.%s)", name)
@@ -877,16 +880,15 @@ func (t *CodeGenerator) calcArrayMemberSize(name string, goType string, indent s
 	case "chain.Name":
 		t.writeCode("    size += len(t.%s)*8", name)
 	default:
-		var buf strings.Builder
-		fmt.Fprintf(&buf, "    for i := range t.%s {\n", name)
-		fmt.Fprintf(&buf, "        var v interface{} = &t.%s[i]\n", name)
-		fmt.Fprintf(&buf, "        if vv, ok := v.(chain.StructSize); ok {\n")
-		fmt.Fprintf(&buf, indent+"            size += vv.Size()\n")
-		fmt.Fprintf(&buf, "        } else {\n")
-		fmt.Fprintf(&buf, indent+"            size += int(unsafe.Sizeof(t.%s[i]))\n", name)
-		fmt.Fprintf(&buf, indent+"        }\n")
-		fmt.Fprintf(&buf, indent+"    }\n")
-		t.writeCode(buf.String())
+		t.writeCode(`
+for i := range t.%[1]s {
+	var v interface{} = &t.%[1]s[i]
+	if vv, ok := v.(chain.StructSize); ok {
+		size += vv.Size()
+	} else {
+		size += int(unsafe.Sizeof(t.%[1]s[i]))
+	}
+}`, name)
 	}
 }
 
@@ -896,9 +898,9 @@ func (t *CodeGenerator) genSizeCode(structName string, members []MemberType) {
 	for _, member := range members {
 		if member.IsArray {
 			t.writeCode("    size += chain.PackedSizeLength(uint32(len(t.%s)))", member.Name)
-			t.calcArrayMemberSize(member.Name, member.Type, "")
+			t.calcArrayMemberSize(member.Name, member.Type)
 		} else {
-			t.calcNotArrayMemberSize(member.Name, member.Type, "")
+			t.calcNotArrayMemberSize(member.Name, member.Type)
 		}
 	}
 	t.writeCode("    return size")
