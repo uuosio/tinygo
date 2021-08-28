@@ -224,6 +224,7 @@ type SecondaryIndexInfo struct {
 type StructInfo struct {
 	PackageName      string
 	TableName        string
+	Singleton        bool
 	StructName       string
 	Comment          string
 	PrimaryKey       string
@@ -341,13 +342,20 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 		doc = strings.TrimSpace(doc)
 		if strings.HasPrefix(doc, "//table") {
 			items := Split(doc)
-			if len(items) == 2 {
-				if items[0] == "//table" {
-					tableName := items[1]
-					if !IsNameValid(tableName) {
-						return errors.New("Invalid table name: " + tableName)
-					}
-					info.TableName = items[1]
+			if len(items) == 2 && (items[0] == "//table") {
+				tableName := items[1]
+				if !IsNameValid(tableName) {
+					return errors.New("Invalid table name: " + tableName)
+				}
+				info.TableName = items[1]
+			} else if (len(items) == 3) && (items[0] == "//table") {
+				tableName := items[1]
+				if !IsNameValid(tableName) {
+					return errors.New("Invalid table name: " + tableName)
+				}
+				info.TableName = items[1]
+				if items[2] == "singleton" {
+					info.Singleton = true
 				}
 			}
 		} else if strings.HasPrefix(doc, "//contract") {
@@ -925,10 +933,13 @@ func (t *CodeGenerator) GenCode() error {
 		log.Println("++struct:", info.StructName)
 	}
 
-	t.writeCode("package main\n")
-	t.writeCode("import \"github.com/uuosio/chain\"\n")
-	t.writeCode("import \"github.com/uuosio/chain/database\"\n")
-	t.writeCode("import \"unsafe\"\n")
+	t.writeCode(`package main
+import (
+	"github.com/uuosio/chain"
+    "github.com/uuosio/chain/database"
+    "unsafe"
+)
+`)
 
 	for _, action := range t.Actions {
 		t.genStruct(action.ActionName, action.Members)
@@ -947,17 +958,6 @@ func (t *CodeGenerator) GenCode() error {
 		table := &t.Structs[i]
 		if table.TableName == "" {
 			continue
-		}
-
-		if table.PrimaryKey != "" {
-			t.writeCode("func (t *%s) GetPrimary() uint64 {", table.StructName)
-			t.writeCode("    return %s", table.PrimaryKey)
-			t.writeCode("}")
-		}
-
-		indexes := ""
-		for _, index := range table.SecondaryIndexes {
-			indexes += fmt.Sprintf("database.%s,", index.Type)
 		}
 
 		t.writeCode(`
@@ -1014,26 +1014,91 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 		}
 }`)
 
+		if table.PrimaryKey != "" {
+			t.writeCode("func (t *%s) GetPrimary() uint64 {", table.StructName)
+			t.writeCode("    return %s", table.PrimaryKey)
+			t.writeCode("}")
+		}
+
 		t.writeCode(`
-func %sUnpacker(buf []byte) (database.DBValue, error) {
-	v := &%s{}
+func %[1]sUnpacker(buf []byte) (database.DBValue, error) {
+	v := &%[1]s{}
 	_, err := v.Unpack(buf)
 	if err != nil {
 		return nil, err
 	}
 	return v, nil
-}`, table.StructName, table.StructName)
+}`, table.StructName)
+
+		//generate singleton db code
+		if table.Singleton {
+			t.writeCode(`
+func (d *%[1]s) GetPrimary() uint64 {
+	return uint64(%[2]d)
+}
+
+type %[1]sDB struct {
+	db *database.SingletonDB
+}
+
+func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
+	table := chain.Name{N:uint64(%[2]d)}
+	db := database.NewSingletonDB(code, scope, table, %[1]sUnpacker)
+	return &%[1]sDB{db}
+}
+
+func (t *%[1]sDB) Set(data *%[1]s, payer chain.Name) {
+	t.db.Set(data, payer)
+}
+
+func (t *%[1]sDB) Get() (*%[1]s, error) {
+	data, err := t.db.Get()
+	if err != nil {
+		return nil, err
+	}
+	return data.(*%[1]s), nil
+}
+`, table.StructName, StringToName(table.TableName))
+			continue
+		}
 
 		t.writeCode(`
-func New%sDB(code, scope chain.Name) *database.MultiIndex {
-	table := chain.Name{N:uint64(%d)}
-	return database.NewMultiIndex(code, scope, table, %sDBNameToIndex, %sSecondaryTypes, %sUnpacker)
-}`,
-			table.StructName,
-			StringToName(table.TableName),
-			table.StructName,
-			table.StructName,
-			table.StructName)
+type %[1]sDB struct {
+	database.MultiIndex
+	I database.AccessMultiIndexValue
+}
+
+func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
+	table := chain.Name{N:uint64(%[2]d)}
+	db := database.NewMultiIndex(code, scope, table, %[1]sDBNameToIndex, %[1]sSecondaryTypes, %[1]sUnpacker)
+	return &%[1]sDB{*db, db}
+}
+
+func (mi *%[1]sDB) Store(v *%[1]s, payer chain.Name) {
+	mi.I.Store(v, payer)
+}
+
+func (mi *%[1]sDB) Get(id uint64) (*%[1]s, error) {
+	data, err := mi.I.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	return data.(*%[1]s), nil
+}
+
+func (mi *%[1]sDB) GetByIterator(it database.Iterator) (*%[1]s, error) {
+	data, err := mi.I.GetByIterator(it)
+	if err != nil {
+		return nil, err
+	}
+	return data.(*%[1]s), nil
+}
+
+func (mi *%[1]sDB) Update(it database.Iterator, v *%[1]s, payer chain.Name) {
+	mi.I.Update(it, v, payer)
+}
+`, table.StructName, StringToName(table.TableName))
+
 	}
 
 	t.writeCode(`
@@ -1050,20 +1115,23 @@ func dummy() {
 	if t.HasMainFunc {
 		return nil
 	}
-	t.writeCode("func main() {")
-	t.writeCode("    receiver, firstReceiver, action := chain.GetApplyArgs()")
-	t.writeCode("    contract := NewContract(receiver, firstReceiver, action)")
-	t.writeCode("    if contract == nil {")
-	t.writeCode("        return")
-	t.writeCode("    }")
+
+	t.writeCode(`
+func main() {
+	receiver, firstReceiver, action := chain.GetApplyArgs()
+	contract := NewContract(receiver, firstReceiver, action)
+	if contract == nil {
+		return
+	}`)
+
 	t.writeCode("    if receiver == firstReceiver {")
 	t.GenActionCode()
-	t.writeCode("    }\n")
+	t.writeCode("    }")
 
 	t.writeCode("    if receiver != firstReceiver {")
 	t.GenNotifyCode()
 	t.writeCode("    }")
-	t.writeCode("}\n")
+	t.writeCode("}")
 	return nil
 }
 
