@@ -4,7 +4,7 @@ package runtime
 
 /*
 #include <stdint.h>
-void prints( const char* cstr );
+void prints_l( const char* cstr, uint32_t len);
 */
 import "C"
 
@@ -51,7 +51,7 @@ func putchar(c byte) {
 
 	if c == '\n' || putcharPosition >= putcharBufferSize {
 		putcharIOVec.bufLen = putcharPosition
-		C.prints((*C.char)(unsafe.Pointer(&putcharBuffer)))
+		C.prints_l((*C.char)(unsafe.Pointer(&putcharBuffer)), uint32(putcharPosition))
 		//		fd_write(stdout, &putcharIOVec, 1, &putcharNWritten)
 		putcharPosition = 0
 	}
