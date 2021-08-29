@@ -310,8 +310,11 @@ func (t *CodeGenerator) convertToAbiType(goType string) (string, error) {
 	if _, ok := t.abiStructsMap[goType]; ok {
 		return goType, nil
 	}
-
-	return "", fmt.Errorf("type %s can not be converted to an ABI type", goType)
+	msg := fmt.Sprintf("type %s can not be converted to an ABI type", goType)
+	if goType == "Asset" || goType == "Symbol" || goType == "Name" {
+		msg += "\nDo you mean chain." + goType
+	}
+	return "", fmt.Errorf(msg)
 }
 
 func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
@@ -389,25 +392,54 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 			//TODO panic on FuncType
 			if info.TableName != "" && field.Comment != nil {
 				comment := field.Comment.List[0]
-				text := strings.TrimSpace(comment.Text)
-				indexInfo := strings.Split(text, ":")
+				indexText := strings.TrimSpace(comment.Text)
+				indexInfo := strings.Split(indexText, ":")
 				//parse comment like://primary:t.primary
-				if len(indexInfo) == 2 && indexInfo[0] == "//primary" {
-					info.PrimaryKey = indexInfo[1]
-				} else if len(indexInfo) == 3 { //parse comment: //IDX64:t.Account.N:t.Account.N=%v
-					idx := indexInfo[0][2:]
-					if _, ok := t.indexTypeMap[idx]; ok {
-						getter := strings.TrimSpace(indexInfo[1])
-						setter := strings.TrimSpace(indexInfo[2])
-						indexInfo := SecondaryIndexInfo{idx, "", getter, setter}
-						info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
-					}
-				} else if len(indexInfo) == 4 { //parse comment: //IDX64:byaccount:t.Account.N:t.Account.N=%v
-					idx := indexInfo[0][2:]
-					if _, ok := t.indexTypeMap[idx]; ok {
+				if len(indexInfo) > 1 {
+					dbType := strings.TrimSpace(indexInfo[0])
+					if dbType == "//primary" {
+						if len(indexInfo) == 2 {
+							primary := strings.TrimSpace(indexInfo[1])
+							if primary == "" {
+								return errors.New("Empty primary key in struct " + name)
+							}
+
+							if info.PrimaryKey != "" {
+								return errors.New("Duplicated primary key in struct " + name)
+							}
+							info.PrimaryKey = primary
+						} else {
+							errMsg := fmt.Sprintf("Invalid primary key in struct %s: %s", name, indexText)
+							return errors.New(errMsg)
+						}
+					} else if _, ok := t.indexTypeMap[dbType[2:]]; ok {
+						if len(indexInfo) != 4 {
+							errMsg := fmt.Sprintf("Invalid index DB in struct %s: %s", name, indexText)
+							return errors.New(errMsg)
+						}
+
+						idx := dbType[2:]
 						name := strings.TrimSpace(indexInfo[1])
+						if name == "" {
+							return errors.New("Invalid name in: " + indexText)
+						}
+
+						for i := range info.SecondaryIndexes {
+							if info.SecondaryIndexes[i].Name == name {
+								errMsg := fmt.Sprintf("Duplicated index name %s in %s", name, indexText)
+								return errors.New(errMsg)
+							}
+						}
+
 						getter := strings.TrimSpace(indexInfo[2])
+						if getter == "" {
+							return errors.New("Invalid getter in: " + indexText)
+						}
+
 						setter := strings.TrimSpace(indexInfo[3])
+						if setter == "" {
+							return errors.New("Invalid setter in: " + indexText)
+						}
 						indexInfo := SecondaryIndexInfo{idx, name, getter, setter}
 						info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
 					}
@@ -521,6 +553,7 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 
 	items := Split(doc)
 	if len(items) != 2 {
+		return nil
 	}
 
 	if items[0] == "//action" || items[0] == "//notify" {
@@ -534,7 +567,7 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	}
 
 	if _, ok := t.actionMap[actionName]; ok {
-		return errors.New("dumplicated action name: " + actionName)
+		return errors.New("Dumplicated action name: " + actionName)
 	}
 
 	t.actionMap[actionName] = true
@@ -823,34 +856,23 @@ func (t *CodeGenerator) calcNotArrayMemberSize(name string, goType string) {
 	case "chain.Symbol":
 		code = "    size += 8"
 	default:
-		code = fmt.Sprintf(`
-{
-	var v interface{} = &t.%[1]s
-	if vv, ok := v.(chain.StructSize); ok {
-		size += vv.Size()
-	} else {
-		size += int(unsafe.Sizeof(t.%[1]s))
-	}
-}`, name)
+		code = fmt.Sprintf("	size += t.%[1]s.Size()", name)
 	}
 	t.writeCode(code)
 }
 
 func (t *CodeGenerator) calcArrayMemberSize(name string, goType string) {
-	var code string
-
 	switch goType {
 	case "byte":
 		t.writeCode("    size += len(t.%s)", name)
 	case "[]byte":
-		code = fmt.Sprintf("    for i := range t.%s {\n", name)
-		code += fmt.Sprintf("        size += chain.PackedSizeLength(uint32(len(t.%s[i]))) + len(t.%s[i])\n", name, name)
-		code += "    }\n"
+		t.writeCode(`	for i := range t.%[1]s {
+		size += chain.PackedSizeLength(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
+	}`, name)
 	case "string":
-		code = fmt.Sprintf("    for i := range t.%s {\n", name)
-		code += fmt.Sprintf("        size += chain.PackedSizeLength(uint32(len(t.%s[i]))) + len(t.%s[i])\n", name, name)
-		code += "    }\n"
-		t.writeCode(code)
+		t.writeCode(`    for i := range t.%[1]s {
+		        size += chain.PackedSizeLength(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
+		    }`, name)
 	case "bool":
 		t.writeCode("    size += len(t.%s)", name)
 	case "uint8":
@@ -881,14 +903,9 @@ func (t *CodeGenerator) calcArrayMemberSize(name string, goType string) {
 		t.writeCode("    size += len(t.%s)*8", name)
 	default:
 		t.writeCode(`
-for i := range t.%[1]s {
-	var v interface{} = &t.%[1]s[i]
-	if vv, ok := v.(chain.StructSize); ok {
-		size += vv.Size()
-	} else {
-		size += int(unsafe.Sizeof(t.%[1]s[i]))
-	}
-}`, name)
+    for i := range t.%[1]s {
+        size += t.%[1]s[i].Size()
+    }`, name)
 	}
 }
 
@@ -1053,12 +1070,12 @@ func (t *%[1]sDB) Set(data *%[1]s, payer chain.Name) {
 	t.db.Set(data, payer)
 }
 
-func (t *%[1]sDB) Get() (*%[1]s, error) {
-	data, err := t.db.Get()
-	if err != nil {
-		return nil, err
+func (t *%[1]sDB) Get() (*%[1]s) {
+	data := t.db.Get()
+	if data == nil {
+		return nil
 	}
-	return data.(*%[1]s), nil
+	return data.(*%[1]s)
 }
 `, table.StructName, StringToName(table.TableName))
 			continue
@@ -1066,26 +1083,26 @@ func (t *%[1]sDB) Get() (*%[1]s, error) {
 
 		t.writeCode(`
 type %[1]sDB struct {
-	database.MultiIndex
-	I database.AccessMultiIndexValue
+	database.MultiIndexInterface
+	I database.MultiIndexInterface
 }
 
 func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
 	table := chain.Name{N:uint64(%[2]d)}
 	db := database.NewMultiIndex(code, scope, table, %[1]sDBNameToIndex, %[1]sSecondaryTypes, %[1]sUnpacker)
-	return &%[1]sDB{*db, db}
+	return &%[1]sDB{db, db}
 }
 
 func (mi *%[1]sDB) Store(v *%[1]s, payer chain.Name) {
 	mi.I.Store(v, payer)
 }
 
-func (mi *%[1]sDB) Get(id uint64) (*%[1]s, error) {
-	data, err := mi.I.Get(id)
-	if err != nil {
-		return nil, err
+func (mi *%[1]sDB) Get(id uint64) (database.Iterator, *%[1]s) {
+	it, data := mi.I.Get(id)
+	if !it.IsOk() {
+		return it, nil
 	}
-	return data.(*%[1]s), nil
+	return it, data.(*%[1]s)
 }
 
 func (mi *%[1]sDB) GetByIterator(it database.Iterator) (*%[1]s, error) {
