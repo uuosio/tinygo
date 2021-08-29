@@ -1234,6 +1234,17 @@ func main() {
 		}
 		err := Build(pkgName, outpath, options)
 		handleCompilerError(err)
+	case "gencode":
+		pkgName := "."
+		if flag.NArg() == 1 {
+			pkgName = filepath.ToSlash(flag.Arg(0))
+		} else if flag.NArg() > 1 {
+			fmt.Fprintln(os.Stderr, "gencode only accepts a single positional argument: package name, but multiple were specified")
+			usage()
+			os.Exit(1)
+		}
+		err := GenerateCode(pkgName)
+		handleCompilerError(err)
 	case "build-library":
 		// Note: this command is only meant to be used while making a release!
 		if outpath == "" {
