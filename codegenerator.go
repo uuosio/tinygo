@@ -1040,7 +1040,7 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 		}
 
 		t.writeCode(`
-func %[1]sUnpacker(buf []byte) (database.DBValue, error) {
+func %[1]sUnpacker(buf []byte) (database.MultiIndexValue, error) {
 	v := &%[1]s{}
 	_, err := v.Unpack(buf)
 	if err != nil {
