@@ -235,6 +235,7 @@ type StructInfo struct {
 type CodeGenerator struct {
 	DirName            string
 	contractName       string
+	fset               *token.FileSet
 	codeFile           *os.File
 	Actions            []ActionInfo
 	Structs            []StructInfo
@@ -332,6 +333,11 @@ func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
 	return abiType, nil
 }
 
+func (t *CodeGenerator) newError(p token.Pos, msg string) error {
+	errMsg := fmt.Sprintf("%s\n%s", t.getLineInfo(p), msg)
+	return errors.New(errMsg)
+}
+
 func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 	if v.Tok != token.TYPE {
 		return nil
@@ -341,28 +347,28 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 	isContractStruct := false
 	if v.Doc != nil {
 		n := len(v.Doc.List)
-		doc := v.Doc.List[n-1].Text
-		doc = strings.TrimSpace(doc)
-		if strings.HasPrefix(doc, "//table") {
-			items := Split(doc)
+		doc := v.Doc.List[n-1]
+		text := strings.TrimSpace(doc.Text)
+		if strings.HasPrefix(text, "//table") {
+			items := Split(text)
 			if len(items) == 2 && (items[0] == "//table") {
 				tableName := items[1]
 				if !IsNameValid(tableName) {
-					return errors.New("Invalid table name: " + tableName)
+					return t.newError(doc.Pos(), "Invalid table name:"+tableName)
 				}
 				info.TableName = items[1]
 			} else if (len(items) == 3) && (items[0] == "//table") {
 				tableName := items[1]
 				if !IsNameValid(tableName) {
-					return errors.New("Invalid table name: " + tableName)
+					return t.newError(doc.Pos(), "Invalid table name:"+tableName)
 				}
 				info.TableName = items[1]
 				if items[2] == "singleton" {
 					info.Singleton = true
 				}
 			}
-		} else if strings.HasPrefix(doc, "//contract") {
-			items := Split(doc)
+		} else if strings.HasPrefix(text, "//contract") {
+			items := Split(text)
 			if len(items) == 2 {
 				name := items[1]
 				if t.contractName != "" {
@@ -401,44 +407,44 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 						if len(indexInfo) == 2 {
 							primary := strings.TrimSpace(indexInfo[1])
 							if primary == "" {
-								return errors.New("Empty primary key in struct " + name)
+								return t.newError(comment.Pos(), "Empty primary key in struct "+name)
 							}
 
 							if info.PrimaryKey != "" {
-								return errors.New("Duplicated primary key in struct " + name)
+								return t.newError(comment.Pos(), "Duplicated primary key in struct "+name)
 							}
 							info.PrimaryKey = primary
 						} else {
 							errMsg := fmt.Sprintf("Invalid primary key in struct %s: %s", name, indexText)
-							return errors.New(errMsg)
+							return t.newError(comment.Pos(), errMsg)
 						}
 					} else if _, ok := t.indexTypeMap[dbType[2:]]; ok {
 						if len(indexInfo) != 4 {
 							errMsg := fmt.Sprintf("Invalid index DB in struct %s: %s", name, indexText)
-							return errors.New(errMsg)
+							return t.newError(comment.Pos(), errMsg)
 						}
 
 						idx := dbType[2:]
 						name := strings.TrimSpace(indexInfo[1])
 						if name == "" {
-							return errors.New("Invalid name in: " + indexText)
+							return t.newError(comment.Pos(), "Invalid name in: "+indexText)
 						}
 
 						for i := range info.SecondaryIndexes {
 							if info.SecondaryIndexes[i].Name == name {
 								errMsg := fmt.Sprintf("Duplicated index name %s in %s", name, indexText)
-								return errors.New(errMsg)
+								return t.newError(comment.Pos(), errMsg)
 							}
 						}
 
 						getter := strings.TrimSpace(indexInfo[2])
 						if getter == "" {
-							return errors.New("Invalid getter in: " + indexText)
+							return t.newError(comment.Pos(), "Invalid getter in: "+indexText)
 						}
 
 						setter := strings.TrimSpace(indexInfo[3])
 						if setter == "" {
-							return errors.New("Invalid setter in: " + indexText)
+							return t.newError(comment.Pos(), "Invalid setter in: "+indexText)
 						}
 						indexInfo := SecondaryIndexInfo{idx, name, getter, setter}
 						info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
@@ -482,7 +488,7 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 							info.Members = append(info.Members, member)
 						} else {
 							errMsg := fmt.Sprintf("Unsupported field %s in %s", name, info.StructName)
-							return errors.New(errMsg)
+							return t.newError(field.Pos(), errMsg)
 						}
 					}
 				case *ast.SelectorExpr:
@@ -496,7 +502,7 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 					}
 				default:
 					errMsg := fmt.Sprintf("unsupported type: %T %s.%v", v, info.StructName, field.Names)
-					return errors.New(errMsg)
+					return t.newError(field.Pos(), errMsg)
 				}
 			case *ast.SelectorExpr:
 				ident := fieldType.X.(*ast.Ident)
@@ -524,8 +530,8 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 			// 	log.Printf("++++++anonymous struct does not supported currently: %s in %s", field.Names, name)
 			// log.Printf("%T %v", fieldType, field.Names)
 			default:
-				s := fmt.Sprintf("Unsupported field: %v in struct: %s", field.Names, name)
-				panic(s)
+				errMsg := fmt.Sprintf("Unsupported field: %v in struct: %s", field.Names, name)
+				return t.newError(field.Pos(), errMsg)
 			}
 		}
 		t.Structs = append(t.Structs, info)
@@ -535,6 +541,12 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 
 func IsNameValid(name string) bool {
 	return NameToString(StringToName(name)) == name
+}
+
+func (t *CodeGenerator) getLineInfo(p token.Pos) string {
+	pos := t.fset.Position(p)
+	return pos.String()
+	// log.Println(pos.String())
 }
 
 func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
@@ -548,10 +560,10 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 		return nil
 	}
 	n := len(f.Doc.List)
-	doc := f.Doc.List[n-1].Text
-	doc = strings.TrimSpace(doc)
+	doc := f.Doc.List[n-1]
+	text := strings.TrimSpace(doc.Text)
 
-	items := Split(doc)
+	items := Split(text)
 	if len(items) != 2 {
 		return nil
 	}
@@ -563,11 +575,13 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 
 	actionName := items[1]
 	if !IsNameValid(actionName) {
-		return errors.New("Invalid action name: " + actionName)
+		errMsg := fmt.Sprintf("Invalid action name: %s", actionName)
+		return t.newError(doc.Pos(), errMsg)
 	}
 
 	if _, ok := t.actionMap[actionName]; ok {
-		return errors.New("Dumplicated action name: " + actionName)
+		errMsg := fmt.Sprintf("Dumplicated action name: %s", actionName)
+		return t.newError(doc.Pos(), errMsg)
 	}
 
 	t.actionMap[actionName] = true
@@ -630,9 +644,7 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 }
 
 func (t *CodeGenerator) ParseGoFile(goFile string) error {
-	fset := token.NewFileSet()
-
-	file, err := parser.ParseFile(fset, goFile, nil, parser.ParseComments)
+	file, err := parser.ParseFile(t.fset, goFile, nil, parser.ParseComments)
 	if err != nil {
 		return err
 	}
@@ -654,7 +666,7 @@ func (t *CodeGenerator) ParseGoFile(goFile string) error {
 				return err
 			}
 		default:
-			return errors.New("unknown declaration")
+			return t.newError(decl.Pos(), "Unknown declaration")
 		}
 	}
 
@@ -1316,6 +1328,8 @@ func (t *CodeGenerator) Analyse() {
 
 func GenerateCode(inFile string) error {
 	gen := NewCodeGenerator()
+	gen.fset = token.NewFileSet()
+
 	if filepath.Ext(inFile) == ".go" {
 		ext := filepath.Ext(inFile)
 		if ext == ".go" {
