@@ -1,2 +1,6 @@
-tinygo build -x -gc=leaking -target eosio -wasm-abi=generic -scheduler=none -opt z -tags=math_big_pure_go $@
-
+#!/bin/bash
+if [ $1 == "build" ]; then
+tinygo build -x -gc=leaking -target eosio -wasm-abi=generic -scheduler=none -opt z -tags=math_big_pure_go ${@:2}
+else
+tinygo $@
+fi
