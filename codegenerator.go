@@ -165,6 +165,12 @@ func _convertToAbiType(goType string) string {
 		return "int32"
 	case "byte":
 		return "uint8"
+	case "chain.VarInt32":
+		return "varint32"
+	case "chain.VarUint32":
+		return "varuint32"
+	case "chain.Int128":
+		return "int128"
 	case "chain.Uint128":
 		return "uint128"
 	case "chain.Float128":
@@ -724,6 +730,8 @@ func (t *CodeGenerator) packNotArrayType(goName string, goType string) {
 		format = "    enc.PackString(t.%s)"
 	case "bool":
 		format = "    enc.PackBool(t.%s)"
+	case "int8":
+		format = "    enc.PackUint8(uint8(t.%s))"
 	case "uint8":
 		format = "    enc.PackUint8(t.%s)"
 	case "int16":
@@ -842,6 +850,8 @@ func (t *CodeGenerator) calcNotArrayMemberSize(name string, goType string) {
 		code = "    size += 1"
 	case "bool":
 		code = "    size += 1"
+	case "int8":
+		code = "    size += 1"
 	case "uint8":
 		code = "    size += 1"
 	case "int16":
@@ -858,6 +868,8 @@ func (t *CodeGenerator) calcNotArrayMemberSize(name string, goType string) {
 		code = "    size += 8"
 	case "uint64":
 		code = "    size += 8"
+	case "chain.Int128":
+		code = "    size += 16"
 	case "chain.Uint128":
 		code = "    size += 16"
 	case "chain.Uint256":
