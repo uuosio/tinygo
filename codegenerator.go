@@ -163,6 +163,8 @@ func _convertToAbiType(goType string) string {
 	switch goType {
 	case "int":
 		return "int32"
+	case "byte":
+		return "uint8"
 	case "chain.Uint128":
 		return "uint128"
 	case "chain.Float128":
@@ -319,6 +321,11 @@ func (t *CodeGenerator) convertToAbiType(goType string) (string, error) {
 }
 
 func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
+	//special case for []byte type
+	if goType.Type == "byte" && goType.IsArray {
+		return "bytes", nil
+	}
+
 	abiType, err := t.convertToAbiType(goType.Type)
 	if err != nil {
 		return "", err
@@ -328,7 +335,7 @@ func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
 		if abiType == "byte" {
 			return "bytes", nil
 		}
-		return "[]" + abiType, nil
+		return abiType + "[]", nil
 	}
 	return abiType, nil
 }
@@ -830,7 +837,7 @@ func (t *CodeGenerator) calcNotArrayMemberSize(name string, goType string) {
 
 	switch goType {
 	case "string":
-		code = fmt.Sprintf("    size += chain.PackedSizeLength(uint32(len(t.%s))) + len(t.%s)", name, name)
+		code = fmt.Sprintf("    size += chain.PackedVarUint32Length(uint32(len(t.%s))) + len(t.%s)", name, name)
 	case "byte":
 		code = "    size += 1"
 	case "bool":
@@ -879,11 +886,11 @@ func (t *CodeGenerator) calcArrayMemberSize(name string, goType string) {
 		t.writeCode("    size += len(t.%s)", name)
 	case "[]byte":
 		t.writeCode(`	for i := range t.%[1]s {
-		size += chain.PackedSizeLength(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
+		size += chain.PackedVarUint32Length(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
 	}`, name)
 	case "string":
 		t.writeCode(`    for i := range t.%[1]s {
-		        size += chain.PackedSizeLength(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
+		        size += chain.PackedVarUint32Length(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
 		    }`, name)
 	case "bool":
 		t.writeCode("    size += len(t.%s)", name)
@@ -926,7 +933,7 @@ func (t *CodeGenerator) genSizeCode(structName string, members []MemberType) {
 	t.writeCode("    size := 0")
 	for _, member := range members {
 		if member.IsArray {
-			t.writeCode("    size += chain.PackedSizeLength(uint32(len(t.%s)))", member.Name)
+			t.writeCode("    size += chain.PackedVarUint32Length(uint32(len(t.%s)))", member.Name)
 			t.calcArrayMemberSize(member.Name, member.Type)
 		} else {
 			t.calcNotArrayMemberSize(member.Name, member.Type)
