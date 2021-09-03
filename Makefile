@@ -502,7 +502,7 @@ build/release: tinygo gen-device wasi-libc
 
 release: build/release
 	mv build/release/tinygo build/release/uuosio.gscdk
-	tar -czf build/release.tar.gz -C build/release uuosio.gscdk
+	tar -czf build/uuosio.gscdk.tar.gz -C build/release uuosio.gscdk
 	mv build/release/uuosio.gscdk build/release/tinygo
 
 deb: build/release
@@ -519,4 +519,4 @@ deb-eosio: build/release
 	ln -sf ../lib/uuosio.gscdk/bin/tinygo build/release-deb/usr/local/bin/tinygo
 	ln -sf ../lib/uuosio.gscdk/bin/eosio-go build/release-deb/usr/local/bin/eosio-go
 	ln -sf ../lib/uuosio.gscdk/bin/eosio-strip build/release-deb/usr/local/bin/eosio-strip
-	fpm -f -s dir -t deb -n uuosio.gscdk -v $(shell grep "const Version = " goenv/version.go | awk '{print $$NF}') -m '@tinygo-org' --description='TinyGo is a Go compiler for small places.' --license='BSD 3-Clause' --url=https://tinygo.org/ --deb-changelog CHANGELOG.md -p build/release.deb -C ./build/release-deb
+	fpm -f -s dir -t deb -n uuosio.gscdk -v $(shell grep "const Version = " goenv/version.go | awk '{print $$NF}') -m '@tinygo-org' --description='TinyGo is a Go compiler for small places.' --license='BSD 3-Clause' --url=https://tinygo.org/ --deb-changelog CHANGELOG.md -p build/uuosio.gscdk.deb -C ./build/release-deb
