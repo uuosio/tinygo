@@ -3,37 +3,18 @@
 package os
 
 /*
-void prints( const char* cstr );
+#include <stdint.h>
+void prints_l( const char* cstr, uint32_t len);
 */
 import "C"
 import (
-	"io"
-	"runtime"
+	"errors"
 	"syscall"
 	"unsafe"
 )
 
-var gPrintBuffer = unsafe.Pointer(uintptr(0))
-var gPrintBufferSize = 513
-
 func PrintBytes(s []byte) {
-	if len(s)+1 > gPrintBufferSize {
-		gPrintBufferSize = len(s) + 1
-		if gPrintBuffer != unsafe.Pointer(uintptr(0)) {
-			runtime.Free(gPrintBuffer)
-			gPrintBuffer = unsafe.Pointer(uintptr(0))
-		}
-	}
-
-	if gPrintBuffer == unsafe.Pointer(uintptr(0)) {
-		gPrintBuffer = runtime.Alloc(uintptr(gPrintBufferSize))
-	}
-
-	pp := (*[1 << 30]byte)(gPrintBuffer)
-	copy(pp[:], s)
-	pp[len(s)] = 0
-	// C.printui(uint64(uintptr(unsafe.Pointer(&tmp))))
-	C.prints((*C.char)(gPrintBuffer))
+	C.prints_l((*C.char)(unsafe.Pointer(&s[0])), C.uint32_t(len(s)))
 }
 
 func init() {
@@ -60,42 +41,16 @@ type unixFilesystem struct {
 }
 
 func (fs unixFilesystem) Mkdir(path string, perm FileMode) error {
-	return handleSyscallError(syscall.Mkdir(path, uint32(perm)))
+	return errors.New("unimplemented")
 }
 
 func (fs unixFilesystem) Remove(path string) error {
-	return handleSyscallError(syscall.Unlink(path))
+	return errors.New("unimplemented")
 }
 
 func (fs unixFilesystem) OpenFile(path string, flag int, perm FileMode) (FileHandle, error) {
 	// Map os package flags to syscall flags.
-	syscallFlag := 0
-	if flag&O_RDONLY != 0 {
-		syscallFlag |= syscall.O_RDONLY
-	}
-	if flag&O_WRONLY != 0 {
-		syscallFlag |= syscall.O_WRONLY
-	}
-	if flag&O_RDWR != 0 {
-		syscallFlag |= syscall.O_RDWR
-	}
-	if flag&O_APPEND != 0 {
-		syscallFlag |= syscall.O_APPEND
-	}
-	if flag&O_CREATE != 0 {
-		syscallFlag |= syscall.O_CREAT
-	}
-	if flag&O_EXCL != 0 {
-		syscallFlag |= syscall.O_EXCL
-	}
-	if flag&O_SYNC != 0 {
-		syscallFlag |= syscall.O_SYNC
-	}
-	if flag&O_TRUNC != 0 {
-		syscallFlag |= syscall.O_TRUNC
-	}
-	fp, err := syscall.Open(path, syscallFlag, uint32(perm))
-	return unixFileHandle(fp), handleSyscallError(err)
+	return unixFileHandle(0), errors.New("unimplemented")
 }
 
 // unixFileHandle is a Unix file pointer with associated methods that implement
@@ -105,12 +60,7 @@ type unixFileHandle uintptr
 // Read reads up to len(b) bytes from the File. It returns the number of bytes
 // read and any error encountered. At end of file, Read returns 0, io.EOF.
 func (f unixFileHandle) Read(b []byte) (n int, err error) {
-	n, err = syscall.Read(int(f), b)
-	err = handleSyscallError(err)
-	if n == 0 && err == nil {
-		err = io.EOF
-	}
-	return
+	return 0, errors.New("unimplemented")
 }
 
 // Write writes len(b) bytes to the File. It returns the number of bytes written
@@ -119,14 +69,12 @@ func (f unixFileHandle) Write(b []byte) (n int, err error) {
 	PrintBytes(b)
 	n = len(b)
 	err = nil
-	// n, err = syscall.Write(int(f), b)
-	// err = handleSyscallError(err)
-	return
+	return n, err
 }
 
 // Close closes the File, rendering it unusable for I/O.
 func (f unixFileHandle) Close() error {
-	return handleSyscallError(syscall.Close(int(f)))
+	return errors.New("unimplemented")
 }
 
 // handleSyscallError converts syscall errors into regular os package errors.
