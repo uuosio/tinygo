@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+from inspect import currentframe, getframeinfo
 
 from uuoskit import wasmcompiler
 
@@ -13,19 +14,32 @@ from uuosio.chaintester import ChainTester
 
 logger = log.get_logger(__name__)
 
+def get_line_number():
+    cf = currentframe()
+    return cf.f_back.f_lineno
+
 def print_console(tx):
+    cf = currentframe()
+    filename = getframeinfo(cf).filename
+
+    num = cf.f_back.f_lineno
+
     if 'processed' in tx:
         tx = tx['processed']
     for trace in tx['action_traces']:
-        logger.info(trace['console'])
+        # logger.info(trace['console'])
+        print(f'+++++console:{num}', trace['console'])
+
         if not 'inline_traces' in trace:
             continue
         for inline_trace in trace['inline_traces']:
-            logger.info('++inline console:', inline_trace['console'])
+            # logger.info(inline_trace['console'])
+            print(f'+++++console:{num}', inline_trace['console'])
 
 def print_except(tx):
     if 'processed' in tx:
         tx = tx['processed']
+    logger.info(tx)
     for trace in tx['action_traces']:
         logger.info(trace['console'])
         logger.info(json.dumps(trace['except'], indent=4))
@@ -82,3 +96,5 @@ class Test(object):
             print_except(e.args[0])
 
         r = self.chain.push_action('hello', 'zzzzzzzzzzzzj', b'')
+
+        r = self.chain.push_action('hello', 'testpointer', {'a': 'alice'})

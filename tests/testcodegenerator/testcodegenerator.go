@@ -17,7 +17,7 @@ type Singleton struct {
 
 //table mytable
 type MyData struct {
-	// primary uint64 //primary:t.primary
+	primary uint64 //primary:t.primary
 	//emtpy primary key
 	// primary uint64         //primary:
 	a1 uint64         //IDX64:bya1:t.a1:t.a1
@@ -67,4 +67,9 @@ func (c *MyContract) SayHellooo(name string) {
 //value 0xffffffffffffffff
 //action zzzzzzzzzzzzj
 func (c *MyContract) zzzzzzzzzzzzj() {
+}
+
+//action testpointer
+func (c *MyContract) testpointer(a *chain.Name) {
+	chain.Println("+++++your name:", *a)
 }
