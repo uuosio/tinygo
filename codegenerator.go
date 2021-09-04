@@ -660,7 +660,10 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 					action.Members = append(action.Members, member)
 				}
 			case *ast.SelectorExpr:
-				ident := v2.X.(*ast.Ident)
+				ident, ok := v2.X.(*ast.Ident)
+				if !ok {
+					panic("Unhandled pointer type:" + fmt.Sprintf("%[1]v %[1]T", v2))
+				}
 				for _, name := range v.Names {
 					member := MemberType{}
 					member.Name = name.Name
@@ -669,10 +672,10 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 					action.Members = append(action.Members, member)
 				}
 			default:
-				panic("unknown pointer type:" + fmt.Sprintf("%T", v2))
+				panic("Unhandled pointer type:" + fmt.Sprintf("%[1]v %[1]T", v2))
 			}
 		default:
-			panic("unknown type:" + fmt.Sprintf("%T", expr))
+			panic("Unhandled type:" + fmt.Sprintf("%[1]v %[1]T", expr))
 		}
 	}
 	t.Actions = append(t.Actions, action)
