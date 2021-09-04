@@ -1,4 +1,4 @@
-tinygo build -x -gc=leaking -o test.wasm -target eosio -wasm-abi=generic -scheduler=none  -opt z -tags=math_big_pure_go .
+eosio-go -o test.wasm .
 if [ $? -ne 0 ]; then
     echo "build failed"
     exit $?
