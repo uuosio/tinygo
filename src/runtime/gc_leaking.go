@@ -2,6 +2,13 @@
 
 package runtime
 
+/*
+#include <stdlib.h>
+#include <string.h>
+// void *	 memset (void *, int, size_t);
+*/
+import "C"
+
 // This GC implementation is the simplest useful memory allocator possible: it
 // only allocates memory and never frees it. For some constrained systems, it
 // may be the only memory allocator possible.
@@ -28,10 +35,12 @@ func alloc(size uintptr) unsafe.Pointer {
 		// Failed to make the heap bigger, so we must really be out of memory.
 		runtimePanic("out of memory")
 	}
-	for i := uintptr(0); i < uintptr(size); i += 4 {
-		ptr := (*uint32)(unsafe.Pointer(addr + i))
-		*ptr = 0
-	}
+
+	C.memset(unsafe.Pointer(addr), 0, C.size_t(size))
+	// for i := uintptr(0); i < uintptr(size); i += 4 {
+	// 	ptr := (*uint32)(unsafe.Pointer(addr + i))
+	// 	*ptr = 0
+	// }
 	return unsafe.Pointer(addr)
 }
 
