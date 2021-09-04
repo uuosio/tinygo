@@ -209,9 +209,10 @@ func _convertToAbiType(goType string) string {
 }
 
 type MemberType struct {
-	Name    string
-	Type    string
-	IsArray bool
+	Name      string
+	Type      string
+	IsArray   bool
+	IsPointer bool
 }
 
 type ActionInfo struct {
@@ -648,6 +649,28 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 				member.IsArray = false
 				action.Members = append(action.Members, member)
 			}
+		case *ast.StarExpr:
+			switch v2 := expr.X.(type) {
+			case *ast.Ident:
+				for _, name := range v.Names {
+					member := MemberType{}
+					member.Name = name.Name
+					member.Type = v2.Name
+					member.IsPointer = true
+					action.Members = append(action.Members, member)
+				}
+			case *ast.SelectorExpr:
+				ident := v2.X.(*ast.Ident)
+				for _, name := range v.Names {
+					member := MemberType{}
+					member.Name = name.Name
+					member.Type = ident.Name + "." + v2.Sel.Name
+					member.IsPointer = true
+					action.Members = append(action.Members, member)
+				}
+			default:
+				panic("unknown pointer type:" + fmt.Sprintf("%T", v2))
+			}
 		default:
 			panic("unknown type:" + fmt.Sprintf("%T", expr))
 		}
@@ -704,7 +727,11 @@ func (t *CodeGenerator) genActionCode(notify bool) {
 		t.writeCode("            t.Unpack(data)")
 		args := "("
 		for i, member := range action.Members {
-			args += "t." + member.Name
+			if member.IsPointer {
+				args += "&t." + member.Name
+			} else {
+				args += "t." + member.Name
+			}
 			if i != len(action.Members)-1 {
 				args += ", "
 			}
