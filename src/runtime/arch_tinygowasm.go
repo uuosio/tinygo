@@ -32,9 +32,9 @@ var (
 
 const wasmPageSize = 64 * 1024
 
-// Align on word boundary.
+// Align on dword boundary.
 func align(ptr uintptr) uintptr {
-	return (ptr + 3) &^ 3
+	return (ptr + 7) &^ 7
 }
 
 func getCurrentStackPointer() uintptr
