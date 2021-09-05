@@ -233,7 +233,7 @@ func (p *Program) getOriginalPath(path string) string {
 			originalPath = realgorootPath
 		}
 		maybeInTinyGoRoot := false
-		for prefix := range pathsToOverride(needsSyscallPackage(p.config.BuildTags())) {
+		for prefix := range pathsToOverride(p.config.BuildTags()) {
 			if !strings.HasPrefix(relpath, prefix) {
 				continue
 			}
