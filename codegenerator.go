@@ -27,7 +27,6 @@ import (
 	uint128
 	varint32
 	varuint32
-
 	float32
 	float64
 	float128
@@ -742,10 +741,9 @@ func (t *CodeGenerator) GenNotifyCode() {
 }
 
 func (t *CodeGenerator) packNotArrayType(goName string, goType string) {
+	// bytes
 	var format string
 	switch goType {
-	case "string":
-		format = "    enc.PackString(t.%s)"
 	case "bool":
 		format = "    enc.PackBool(t.%s)"
 	case "int8":
@@ -756,8 +754,6 @@ func (t *CodeGenerator) packNotArrayType(goName string, goType string) {
 		format = "    enc.PackInt16(t.%s)"
 	case "uint16":
 		format = "    enc.PackUint16(t.%s)"
-	case "int":
-		format = "    enc.PackInt32(int32(t.%s))"
 	case "int32":
 		format = "    enc.PackInt32(t.%s)"
 	case "uint32":
@@ -766,16 +762,33 @@ func (t *CodeGenerator) packNotArrayType(goName string, goType string) {
 		format = "    enc.PackInt64(t.%s)"
 	case "uint64":
 		format = "    enc.PackUint64(t.%s)"
+	case "chain.Int128":
+		format = "    enc.WriteBytes(t.%s[:])"
 	case "chain.Uint128":
 		format = "    enc.WriteBytes(t.%s[:])"
-	case "chain.Uint256":
-		format = "    enc.WriteBytes(t.%s[:])"
+	case "chain.VarInt32":
+		format = "    enc.PackVarInt32(int32(t.%s))"
+	case "chain.VarUint32":
+		format = "    enc.PackVarUint32(uint32(t.%s))"
 	case "float32":
 		format = "    enc.PackFloat32(t.%s)"
 	case "float64":
 		format = "    enc.PackFloat64(t.%s)"
+	case "float128":
+		format = "    enc.WriteBytes(t.%s[:])"
+	case "bytes":
+		format = "    enc.PackBytes(t.%s)"
+	case "string":
+		format = "    enc.PackString(t.%s)"
 	case "chain.Name":
 		format = "    enc.PackUint64(t.%s.N)"
+	case "chain.TimePoint", "chain.TimePointSec",
+		"chain.BlockTimestampType", "chain.Checksum160",
+		"chain.Checksum256", "chain.Checksum512",
+		"chain.PublicKeyType", "chain.Signature",
+		"chain.Symbol", "chain.SymbolCode",
+		"chain.Asset", "chain.ExtendedAsset":
+		format = "    enc.Pack(&t.%s)"
 	default:
 		format = "    enc.Pack(&t.%s)"
 	}
@@ -789,11 +802,10 @@ func (t *CodeGenerator) packArrayType(goName string, goType string) {
 		t.writeCode(`
 {
 	enc.PackLength(len(t.%[1]s))
-	for _, v := range t.%[1]s {
-		enc.Pack(&v)
-	}
-}`, goName)
-
+	for i := range t.%[1]s {`, goName)
+		t.packNotArrayType("    "+goName+"[i]", goType)
+		t.writeCode("    }")
+		t.writeCode("}")
 	}
 }
 
@@ -819,7 +831,6 @@ func (t *CodeGenerator) unpackType(member MemberType) {
 		return
 	}
 	if member.LeadingType == TYPE_SLICE {
-		log.Printf("+++++++unpackType:%s %s %d\n", member.Name, member.Type, member.LeadingType)
 		t.writeCode("{")
 		t.writeCode("    length, _ := dec.UnpackLength()")
 		t.writeCode("    t.%s = make([]%s, length)", member.Name, member.Type)
@@ -925,13 +936,15 @@ func (t *CodeGenerator) calcArrayMemberSize(name string, goType string) {
 		t.writeCode("    size += len(t.%s)", name)
 	case "[]byte":
 		t.writeCode(`	for i := range t.%[1]s {
-		size += chain.PackedVarUint32Length(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
-	}`, name)
+	size += chain.PackedVarUint32Length(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
+}`, name)
 	case "string":
 		t.writeCode(`    for i := range t.%[1]s {
-		        size += chain.PackedVarUint32Length(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
-		    }`, name)
+	 size += chain.PackedVarUint32Length(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
+}`, name)
 	case "bool":
+		t.writeCode("    size += len(t.%s)", name)
+	case "int8":
 		t.writeCode("    size += len(t.%s)", name)
 	case "uint8":
 		t.writeCode("    size += len(t.%s)", name)
