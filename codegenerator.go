@@ -208,11 +208,16 @@ func _convertToAbiType(goType string) string {
 	}
 }
 
+const (
+	TYPE_ARRAY = iota + 1
+	TYPE_SLICE
+	TYPE_POINTER
+)
+
 type MemberType struct {
-	Name      string
-	Type      string
-	IsArray   bool
-	IsPointer bool
+	Name        string
+	Type        string
+	LeadingType int
 }
 
 type ActionInfo struct {
@@ -329,7 +334,7 @@ func (t *CodeGenerator) convertToAbiType(goType string) (string, error) {
 
 func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
 	//special case for []byte type
-	if goType.Type == "byte" && goType.IsArray {
+	if goType.Type == "byte" && goType.LeadingType == TYPE_ARRAY {
 		return "bytes", nil
 	}
 
@@ -338,7 +343,7 @@ func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
 		return "", err
 	}
 
-	if goType.IsArray {
+	if goType.LeadingType == TYPE_ARRAY {
 		if abiType == "byte" {
 			return "bytes", nil
 		}
@@ -350,6 +355,117 @@ func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
 func (t *CodeGenerator) newError(p token.Pos, msg string) error {
 	errMsg := fmt.Sprintf("%s\n%s", t.getLineInfo(p), msg)
 	return errors.New(errMsg)
+}
+
+func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberList *[]MemberType, isStructField bool) error {
+	switch fieldType := field.Type.(type) {
+	case *ast.Ident:
+		if field.Names != nil {
+			for _, v := range field.Names {
+				member := MemberType{}
+				member.Name = v.Name
+				member.Type = fieldType.Name
+				*memberList = append(*memberList, member)
+			}
+		} else {
+			//TODO: parse anonymous struct
+			member := MemberType{}
+			member.Name = ""
+			member.Type = fieldType.Name
+			*memberList = append(*memberList, member)
+		}
+	case *ast.ArrayType:
+		var leadingType int
+		if fieldType.Len != nil {
+			log.Printf("++++++fixed array %v ignored in %s\n", field.Names, structName)
+			return nil
+			leadingType = TYPE_ARRAY
+		} else {
+			leadingType = TYPE_SLICE
+		}
+		//*ast.BasicLit
+		switch v := fieldType.Elt.(type) {
+		case *ast.Ident:
+			for _, name := range field.Names {
+				member := MemberType{}
+				member.Name = name.Name
+				member.Type = v.Name
+				member.LeadingType = leadingType
+				log.Printf("+++++++Len %[1]s %[1]T %d\n", fieldType.Len, leadingType)
+				log.Printf("+++++++++++name: %s, type %s is array type", name.Name, v.Name)
+				*memberList = append(*memberList, member)
+			}
+		case *ast.ArrayType:
+			for _, name := range field.Names {
+				if ident, ok := v.Elt.(*ast.Ident); ok {
+					member := MemberType{}
+					member.Name = name.Name
+					member.Type = "[]" + ident.Name
+					member.LeadingType = leadingType
+					*memberList = append(*memberList, member)
+				} else {
+					errMsg := fmt.Sprintf("Unsupported field %s", name)
+					return t.newError(field.Pos(), errMsg)
+				}
+			}
+		case *ast.SelectorExpr:
+			ident := v.X.(*ast.Ident)
+			for _, name := range field.Names {
+				member := MemberType{}
+				member.Name = name.Name
+				member.Type = ident.Name + "." + v.Sel.Name
+				member.LeadingType = leadingType
+				*memberList = append(*memberList, member)
+			}
+		default:
+			errMsg := fmt.Sprintf("unsupported type: %T %v", v, field.Names)
+			return t.newError(field.Pos(), errMsg)
+		}
+	case *ast.SelectorExpr:
+		ident := fieldType.X.(*ast.Ident)
+		for _, name := range field.Names {
+			member := MemberType{}
+			member.Name = name.Name
+			member.Type = ident.Name + "." + fieldType.Sel.Name
+			// member.IsArray = false
+			*memberList = append(*memberList, member)
+		}
+	case *ast.StarExpr:
+		//Do not parse pointer type in struct
+		if isStructField {
+			log.Printf("+++++++Pointer %v in %s ignored\n", field.Names, structName)
+			return nil
+		}
+
+		switch v2 := fieldType.X.(type) {
+		case *ast.Ident:
+			for _, name := range field.Names {
+				member := MemberType{}
+				member.Name = name.Name
+				member.Type = v2.Name
+				member.LeadingType = TYPE_POINTER
+				*memberList = append(*memberList, member)
+			}
+		case *ast.SelectorExpr:
+			ident, ok := v2.X.(*ast.Ident)
+			if !ok {
+				panic("Unhandled pointer type:" + fmt.Sprintf("%[1]v %[1]T", v2))
+			}
+			for _, name := range field.Names {
+				member := MemberType{}
+				member.Name = name.Name
+				member.Type = ident.Name + "." + v2.Sel.Name
+				member.LeadingType = TYPE_POINTER
+				*memberList = append(*memberList, member)
+			}
+		default:
+			panic("Unhandled pointer type:" + fmt.Sprintf("%[1]v %[1]T", v2))
+		}
+	default:
+		errMsg := fmt.Sprintf("Unsupported field: %v", field.Names)
+		return t.newError(field.Pos(), errMsg)
+	}
+	return nil
 }
 
 func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
@@ -466,86 +582,9 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				}
 			}
 
-			switch fieldType := field.Type.(type) {
-			case *ast.Ident:
-				if field.Names != nil {
-					for _, v := range field.Names {
-						member := MemberType{}
-						member.Name = v.Name
-						member.Type = fieldType.Name
-						info.Members = append(info.Members, member)
-					}
-				} else {
-					//TODO: parse anonymous struct
-					member := MemberType{}
-					member.Name = ""
-					member.Type = fieldType.Name
-					info.Members = append(info.Members, member)
-				}
-			case *ast.ArrayType:
-				switch v := fieldType.Elt.(type) {
-				case *ast.Ident:
-					for _, name := range field.Names {
-						member := MemberType{}
-						member.Name = name.Name
-						member.Type = v.Name
-						member.IsArray = true
-						info.Members = append(info.Members, member)
-					}
-				case *ast.ArrayType:
-					for _, name := range field.Names {
-						if ident, ok := v.Elt.(*ast.Ident); ok {
-							member := MemberType{}
-							member.Name = name.Name
-							member.Type = "[]" + ident.Name
-							member.IsArray = true
-							info.Members = append(info.Members, member)
-						} else {
-							errMsg := fmt.Sprintf("Unsupported field %s in %s", name, info.StructName)
-							return t.newError(field.Pos(), errMsg)
-						}
-					}
-				case *ast.SelectorExpr:
-					ident := v.X.(*ast.Ident)
-					for _, name := range field.Names {
-						member := MemberType{}
-						member.Name = name.Name
-						member.Type = ident.Name + "." + v.Sel.Name
-						member.IsArray = true
-						info.Members = append(info.Members, member)
-					}
-				default:
-					errMsg := fmt.Sprintf("unsupported type: %T %s.%v", v, info.StructName, field.Names)
-					return t.newError(field.Pos(), errMsg)
-				}
-			case *ast.SelectorExpr:
-				ident := fieldType.X.(*ast.Ident)
-				for _, name := range field.Names {
-					member := MemberType{}
-					member.Name = name.Name
-					member.Type = ident.Name + "." + fieldType.Sel.Name
-					member.IsArray = false
-					info.Members = append(info.Members, member)
-				}
-			// case *ast.StarExpr:
-			// 	s := fmt.Sprintf("++++++not supported type: %T %v\n", fieldType, fieldType)
-			// 	log.Println(s)
-			// 	if info.TableName != "" {
-			// 		panic(s)
-			// 	}
-			// case *ast.FuncType:
-			// 	s := fmt.Sprintf("++++++not supported type: %T %v\n", fieldType, fieldType)
-			// 	log.Println(s)
-			// 	if info.TableName != "" {
-			// 		panic(s)
-			// 	}
-			//TODO parse anonymous struct
-			// case *ast.StructType:
-			// 	log.Printf("++++++anonymous struct does not supported currently: %s in %s", field.Names, name)
-			// log.Printf("%T %v", fieldType, field.Names)
-			default:
-				errMsg := fmt.Sprintf("Unsupported field: %v in struct: %s", field.Names, name)
-				return t.newError(field.Pos(), errMsg)
+			err := t.parseField(name, field, &info.Members, true)
+			if err != nil {
+				return err
 			}
 		}
 		t.Structs = append(t.Structs, info)
@@ -622,60 +661,9 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	}
 
 	for _, v := range f.Type.Params.List {
-		switch expr := v.Type.(type) {
-		case *ast.Ident:
-			ident := expr
-			for _, name := range v.Names {
-				member := MemberType{}
-				member.Name = name.Name
-				member.Type = ident.Name
-				action.Members = append(action.Members, member)
-			}
-		case *ast.ArrayType:
-			ident := expr.Elt.(*ast.Ident)
-			for _, name := range v.Names {
-				member := MemberType{}
-				member.Name = name.Name
-				member.Type = ident.Name
-				member.IsArray = true
-				action.Members = append(action.Members, member)
-			}
-		case *ast.SelectorExpr:
-			ident := expr.X.(*ast.Ident)
-			for _, name := range v.Names {
-				member := MemberType{}
-				member.Name = name.Name
-				member.Type = ident.Name + "." + expr.Sel.Name
-				member.IsArray = false
-				action.Members = append(action.Members, member)
-			}
-		case *ast.StarExpr:
-			switch v2 := expr.X.(type) {
-			case *ast.Ident:
-				for _, name := range v.Names {
-					member := MemberType{}
-					member.Name = name.Name
-					member.Type = v2.Name
-					member.IsPointer = true
-					action.Members = append(action.Members, member)
-				}
-			case *ast.SelectorExpr:
-				ident, ok := v2.X.(*ast.Ident)
-				if !ok {
-					panic("Unhandled pointer type:" + fmt.Sprintf("%[1]v %[1]T", v2))
-				}
-				for _, name := range v.Names {
-					member := MemberType{}
-					member.Name = name.Name
-					member.Type = ident.Name + "." + v2.Sel.Name
-					member.IsPointer = true
-					action.Members = append(action.Members, member)
-				}
-			default:
-				panic("Unhandled pointer type:" + fmt.Sprintf("%[1]v %[1]T", v2))
-			}
-		default:
-			panic("Unhandled type:" + fmt.Sprintf("%[1]v %[1]T", expr))
+		err := t.parseField(f.Name.Name, v, &action.Members, false)
+		if err != nil {
+			return err
 		}
 	}
 	t.Actions = append(t.Actions, action)
@@ -730,7 +718,7 @@ func (t *CodeGenerator) genActionCode(notify bool) {
 		t.writeCode("            t.Unpack(data)")
 		args := "("
 		for i, member := range action.Members {
-			if member.IsPointer {
+			if member.LeadingType == TYPE_POINTER {
 				args += "&t." + member.Name
 			} else {
 				args += "t." + member.Name
@@ -814,8 +802,12 @@ func (t *CodeGenerator) packType(member MemberType) {
 		log.Printf("anonymount Type does not supported currently: %s", member.Type)
 		return
 	}
-	if member.IsArray {
+	if member.LeadingType == TYPE_SLICE {
 		t.packArrayType(member.Name, member.Type)
+	} else if member.LeadingType == TYPE_ARRAY {
+		t.writeCode("    for i := range t.%s {", member.Name)
+		t.packNotArrayType(member.Name+"[i]", member.Type)
+		t.writeCode("    }")
 	} else {
 		t.packNotArrayType(member.Name, member.Type)
 	}
@@ -826,7 +818,8 @@ func (t *CodeGenerator) unpackType(member MemberType) {
 		log.Printf("anonymount Type does not supported currently: %s", member.Type)
 		return
 	}
-	if member.IsArray {
+	if member.LeadingType == TYPE_SLICE {
+		log.Printf("+++++++unpackType:%s %s %d\n", member.Name, member.Type, member.LeadingType)
 		t.writeCode("{")
 		t.writeCode("    length, _ := dec.UnpackLength()")
 		t.writeCode("    t.%s = make([]%s, length)", member.Name, member.Type)
@@ -834,6 +827,10 @@ func (t *CodeGenerator) unpackType(member MemberType) {
 		t.writeCode("        dec.Unpack(&t.%s[i])", member.Name)
 		t.writeCode("    }")
 		t.writeCode("}")
+	} else if member.LeadingType == TYPE_ARRAY {
+		t.writeCode("    for i := range t.%s {", member.Name)
+		t.writeCode("        dec.Unpack(&t.%s[i])", member.Name)
+		t.writeCode("    }")
 	} else {
 		t.writeCode("    dec.Unpack(&t.%s)", member.Name)
 	}
@@ -843,7 +840,7 @@ func (t *CodeGenerator) genStruct(structName string, members []MemberType) {
 	log.Println("+++action", structName)
 	t.writeCode("type %s struct {", structName)
 	for _, member := range members {
-		if member.IsArray {
+		if member.LeadingType == TYPE_SLICE {
 			t.writeCode("    %s []%s", member.Name, member.Type)
 		} else {
 			t.writeCode("    %s %s", member.Name, member.Type)
@@ -974,9 +971,13 @@ func (t *CodeGenerator) genSizeCode(structName string, members []MemberType) {
 	t.writeCode("func (t *%s) Size() int {", structName)
 	t.writeCode("    size := 0")
 	for _, member := range members {
-		if member.IsArray {
+		if member.LeadingType == TYPE_SLICE {
 			t.writeCode("    size += chain.PackedVarUint32Length(uint32(len(t.%s)))", member.Name)
 			t.calcArrayMemberSize(member.Name, member.Type)
+		} else if member.LeadingType == TYPE_ARRAY {
+			t.writeCode("    for i := range t.%s {", member.Name)
+			t.calcNotArrayMemberSize(member.Name+"[i]", member.Type)
+			t.writeCode("    }")
 		} else {
 			t.calcNotArrayMemberSize(member.Name, member.Type)
 		}
