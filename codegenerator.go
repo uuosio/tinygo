@@ -247,12 +247,14 @@ type StructInfo struct {
 }
 
 type CodeGenerator struct {
-	DirName            string
-	contractName       string
-	fset               *token.FileSet
-	codeFile           *os.File
-	Actions            []ActionInfo
-	Structs            []StructInfo
+	DirName      string
+	contractName string
+	fset         *token.FileSet
+	codeFile     *os.File
+	Actions      []ActionInfo
+	Structs      []StructInfo
+	structMap    map[string]*StructInfo
+
 	HasMainFunc        bool
 	abiStructsMap      map[string]*StructInfo
 	actionMap          map[string]bool
@@ -301,6 +303,9 @@ type ABI struct {
 
 func NewCodeGenerator() *CodeGenerator {
 	t := &CodeGenerator{}
+	t.structMap = make(map[string]*StructInfo)
+	t.abiStructsMap = make(map[string]*StructInfo)
+
 	t.actionMap = make(map[string]bool)
 	t.abiTypeMap = make(map[string]bool)
 	t.indexTypeMap = make(map[string]bool)
@@ -1383,19 +1388,29 @@ func (t *CodeGenerator) Finish() {
 	t.codeFile.Close()
 }
 
+func (t *CodeGenerator) addAbiStruct(s *StructInfo) {
+	log.Println("++++AddAbiStruct:", s.StructName)
+	t.abiStructsMap[s.StructName] = s
+	for _, member := range s.Members {
+		s2, ok := t.structMap[member.Type]
+		log.Println("++++AddAbiStruct member:", member.Type)
+		if ok {
+			t.addAbiStruct(s2)
+		}
+	}
+}
+
 func (t *CodeGenerator) Analyse() {
-	structMap := make(map[string]*StructInfo)
 	for i := range t.Structs {
 		s := &t.Structs[i]
-		structMap[s.StructName] = s
+		t.structMap[s.StructName] = s
 	}
 
-	t.abiStructsMap = make(map[string]*StructInfo)
 	for _, action := range t.Actions {
 		for _, member := range action.Members {
-			item, ok := structMap[member.Type]
+			item, ok := t.structMap[member.Type]
 			if ok {
-				t.abiStructsMap[member.Type] = item
+				t.addAbiStruct(item)
 			}
 		}
 	}
@@ -1405,22 +1420,9 @@ func (t *CodeGenerator) Analyse() {
 			continue
 		}
 
-		for _, member := range item.Members {
-			item, ok := structMap[member.Type]
-			if ok {
-				t.abiStructsMap[member.Type] = item
-			}
-		}
-	}
-
-	for _, item := range t.Structs {
-		if item.TableName == "" {
-			continue
-		}
-
-		item2, ok := structMap[item.StructName]
+		item2, ok := t.structMap[item.StructName]
 		if ok {
-			t.abiStructsMap[item.StructName] = item2
+			t.addAbiStruct(item2)
 		}
 	}
 }
