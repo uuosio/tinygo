@@ -339,7 +339,7 @@ func (t *CodeGenerator) convertToAbiType(goType string) (string, error) {
 
 func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
 	//special case for []byte type
-	if goType.Type == "byte" && goType.LeadingType == TYPE_ARRAY {
+	if goType.Type == "byte" && goType.LeadingType == TYPE_SLICE {
 		return "bytes", nil
 	}
 
@@ -348,7 +348,7 @@ func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
 		return "", err
 	}
 
-	if goType.LeadingType == TYPE_ARRAY {
+	if goType.LeadingType == TYPE_SLICE {
 		if abiType == "byte" {
 			return "bytes", nil
 		}
