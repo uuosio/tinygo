@@ -225,6 +225,7 @@ type ActionInfo struct {
 	StructName string
 	Members    []MemberType
 	IsNotify   bool
+	Ignore     bool
 }
 
 type SecondaryIndexInfo struct {
@@ -356,7 +357,15 @@ func (t *CodeGenerator) newError(p token.Pos, msg string) error {
 	return errors.New(errMsg)
 }
 
-func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberList *[]MemberType, isStructField bool) error {
+func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberList *[]MemberType, isStructField bool, ignore bool) error {
+	if ignore {
+		_, ok := field.Type.(*ast.StarExpr)
+		if !ok {
+			errMsg := fmt.Sprintf("ignore action parameter %v not a pointer type", field.Names)
+			return errors.New(errMsg)
+		}
+	}
+
 	switch fieldType := field.Type.(type) {
 	case *ast.Ident:
 		if field.Names != nil {
@@ -390,8 +399,6 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 				member.Name = name.Name
 				member.Type = v.Name
 				member.LeadingType = leadingType
-				log.Printf("+++++++Len %[1]s %[1]T %d\n", fieldType.Len, leadingType)
-				log.Printf("+++++++++++name: %s, type %s is array type", name.Name, v.Name)
 				*memberList = append(*memberList, member)
 			}
 		case *ast.ArrayType:
@@ -581,7 +588,7 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				}
 			}
 
-			err := t.parseField(name, field, &info.Members, true)
+			err := t.parseField(name, field, &info.Members, true, false)
 			if err != nil {
 				return err
 			}
@@ -616,7 +623,7 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	text := strings.TrimSpace(doc.Text)
 
 	items := Split(text)
-	if len(items) != 2 {
+	if len(items) < 2 || len(items) > 3 {
 		return nil
 	}
 
@@ -636,11 +643,22 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 		return t.newError(doc.Pos(), errMsg)
 	}
 
+	ignore := false
+	if len(items) == 3 {
+		if items[2] != "ignore" {
+			errMsg := fmt.Sprintf("Bad action, %s not recognized as a valid paramater", items[2])
+			return errors.New(errMsg)
+		}
+		ignore = true
+	}
+
 	t.actionMap[actionName] = true
 
 	action := ActionInfo{}
 	action.ActionName = actionName
 	action.FuncName = f.Name.Name
+	action.Ignore = ignore
+	log.Println("+++++++++ignore:", ignore)
 
 	if items[0] == "//notify" {
 		action.IsNotify = true
@@ -660,7 +678,7 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	}
 
 	for _, v := range f.Type.Params.List {
-		err := t.parseField(f.Name.Name, v, &action.Members, false)
+		err := t.parseField(f.Name.Name, v, &action.Members, false, ignore)
 		if err != nil {
 			return err
 		}
@@ -704,7 +722,7 @@ func (t *CodeGenerator) writeCode(format string, a ...interface{}) {
 	fmt.Fprintf(t.codeFile, format, a...)
 }
 
-func (t *CodeGenerator) genActionCode(notify bool) {
+func (t *CodeGenerator) genActionCode(notify bool) error {
 	t.writeCode("        switch action.N {")
 	for _, action := range t.Actions {
 		if action.IsNotify == notify {
@@ -712,24 +730,42 @@ func (t *CodeGenerator) genActionCode(notify bool) {
 			continue
 		}
 		t.writeCode("        case uint64(%d): //%s", StringToName(action.ActionName), action.ActionName)
-		t.writeCode("            t := %s{}", action.ActionName)
-		t.writeCode("            data := chain.ReadActionData()")
-		t.writeCode("            t.Unpack(data)")
-		args := "("
-		for i, member := range action.Members {
-			if member.LeadingType == TYPE_POINTER {
-				args += "&t." + member.Name
-			} else {
-				args += "t." + member.Name
+		if !action.Ignore {
+			t.writeCode("            t := %s{}", action.ActionName)
+			t.writeCode("            data := chain.ReadActionData()")
+			t.writeCode("            t.Unpack(data)")
+			args := "("
+			for i, member := range action.Members {
+				if member.LeadingType == TYPE_POINTER {
+					args += "&t." + member.Name
+				} else {
+					args += "t." + member.Name
+				}
+				if i != len(action.Members)-1 {
+					args += ", "
+				}
 			}
-			if i != len(action.Members)-1 {
-				args += ", "
+			args += ")"
+			t.writeCode("            contract.%s%s", action.FuncName, args)
+		} else {
+			args := "("
+			for i, member := range action.Members {
+				if member.LeadingType != TYPE_POINTER {
+					//args += "&t." + member.Name
+					return fmt.Errorf("ignore action has not pointer parameter: %s", member.Name)
+				}
+
+				args += "nil"
+				if i != len(action.Members)-1 {
+					args += ", "
+				}
 			}
+			args += ")"
+			t.writeCode("            contract.%s%s", action.FuncName, args)
 		}
-		args += ")"
-		t.writeCode("            contract.%s%s", action.FuncName, args)
 	}
 	t.writeCode("        }")
+	return nil
 }
 
 func (t *CodeGenerator) GenActionCode() {
