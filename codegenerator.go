@@ -685,7 +685,6 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	action.ActionName = actionName
 	action.FuncName = f.Name.Name
 	action.Ignore = ignore
-	log.Println("+++++++++ignore:", ignore)
 
 	if items[0] == "//notify" {
 		action.IsNotify = true
@@ -1483,11 +1482,9 @@ func (t *CodeGenerator) Finish() {
 }
 
 func (t *CodeGenerator) addAbiStruct(s *StructInfo) {
-	log.Println("++++AddAbiStruct:", s.StructName)
 	t.abiStructsMap[s.StructName] = s
 	for _, member := range s.Members {
 		s2, ok := t.structMap[member.Type]
-		log.Println("++++AddAbiStruct member:", member.Type)
 		if ok {
 			t.addAbiStruct(s2)
 		}
