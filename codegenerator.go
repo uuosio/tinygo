@@ -938,6 +938,8 @@ func (t *CodeGenerator) unpackBaseType(varName string, typ string) {
 		t.unpackType("UnpackFloat32", varName)
 	case "float64":
 		t.unpackType("UnpackFloat64", varName)
+	case "[]byte":
+		t.unpackType("UnpackBytes", varName)
 	default:
 		t.unpackI(varName)
 	}
