@@ -158,52 +158,74 @@ func abiTypes() []string {
 	}
 }
 
-func _convertToAbiType(goType string) string {
+func _convertToAbiType(goType string) (string, bool) {
 	switch goType {
-	case "int":
-		return "int32"
 	case "byte":
-		return "uint8"
+		return "uint8", true
+	case "bool":
+		return "bool", true
+	case "int8":
+		return "int8", true
+	case "uint8":
+		return "uint8", true
+	case "int16":
+		return "int16", true
+	case "uint16":
+		return "uint16", true
+	case "int32":
+		return "int32", true
+	case "uint32":
+		return "uint32", true
+	case "int64":
+		return "int64", true
+	case "uint64":
+		return "uint64", true
+	case "string":
+		return "string", true
+	case "float32":
+		return "float32", true
+	case "float64":
+		return "float64", true
 	case "chain.VarInt32":
-		return "varint32"
+		return "varint32", true
 	case "chain.VarUint32":
-		return "varuint32"
+		return "varuint32", true
 	case "chain.Int128":
-		return "int128"
+		return "int128", true
 	case "chain.Uint128":
-		return "uint128"
+		return "uint128", true
 	case "chain.Float128":
-		return "float128"
+		return "float128", true
 	case "chain.Name":
-		return "name"
+		return "name", true
 	case "chain.TimePoint":
-		return "time_point"
+		return "time_point", true
 	case "chain.TimePointSec":
-		return "time_point_sec"
+		return "time_point_sec", true
 	case "chain.BlockTimestampType":
-		return "block_timestamp_type"
+		return "block_timestamp_type", true
 	case "chain.Checksum160":
-		return "checksum160"
+		return "checksum160", true
 	case "chain.Checksum256":
-		return "checksum256"
+		return "checksum256", true
 	case "chain.Uint256":
-		return "checksum256"
+		return "checksum256", true
 	case "chain.Checksum512":
-		return "checksum512"
+		return "checksum512", true
 	case "chain.PublicKey":
-		return "public_key"
+		return "public_key", true
 	case "chain.Signature":
-		return "signature"
+		return "signature", true
 	case "chain.Symbol":
-		return "symbol"
+		return "symbol", true
 	case "chain.SymbolCode":
-		return "symbol_code"
+		return "symbol_code", true
 	case "chain.Asset":
-		return "asset"
+		return "asset", true
 	case "chain.ExtendedAsset":
-		return "extended_asset"
+		return "extended_asset", true
 	default:
-		return goType
+		return "", false
 	}
 }
 
@@ -321,12 +343,12 @@ func NewCodeGenerator() *CodeGenerator {
 }
 
 func (t *CodeGenerator) convertToAbiType(goType string) (string, error) {
-	abiType := _convertToAbiType(goType)
-	if _, ok := t.abiTypeMap[abiType]; ok {
+	abiType, ok := _convertToAbiType(goType)
+	if ok {
 		return abiType, nil
 	}
 
-	// check if type is a abi struct
+	// check if type is an abi struct
 	if _, ok := t.abiStructsMap[goType]; ok {
 		return goType, nil
 	}
@@ -781,70 +803,69 @@ func (t *CodeGenerator) GenNotifyCode() {
 	t.genActionCode(true)
 }
 
-func (t *CodeGenerator) packNotArrayType(goName string, goType string) {
+func (t *CodeGenerator) packNotArrayType(goName string, goType string, indent string) {
 	// bytes
 	var format string
 	switch goType {
 	case "bool":
-		format = "    enc.PackBool(t.%s)"
+		format = "enc.PackBool(t.%s)"
 	case "int8":
-		format = "    enc.PackUint8(uint8(t.%s))"
+		format = "enc.PackUint8(uint8(t.%s))"
 	case "uint8":
-		format = "    enc.PackUint8(t.%s)"
+		format = "enc.PackUint8(t.%s)"
 	case "int16":
-		format = "    enc.PackInt16(t.%s)"
+		format = "enc.PackInt16(t.%s)"
 	case "uint16":
-		format = "    enc.PackUint16(t.%s)"
+		format = "enc.PackUint16(t.%s)"
 	case "int32":
-		format = "    enc.PackInt32(t.%s)"
+		format = "enc.PackInt32(t.%s)"
 	case "uint32":
-		format = "    enc.PackUint32(t.%s)"
+		format = "enc.PackUint32(t.%s)"
 	case "int64":
-		format = "    enc.PackInt64(t.%s)"
+		format = "enc.PackInt64(t.%s)"
 	case "uint64":
-		format = "    enc.PackUint64(t.%s)"
+		format = "enc.PackUint64(t.%s)"
 	case "chain.Int128":
-		format = "    enc.WriteBytes(t.%s[:])"
+		format = "enc.WriteBytes(t.%s[:])"
 	case "chain.Uint128":
-		format = "    enc.WriteBytes(t.%s[:])"
+		format = "enc.WriteBytes(t.%s[:])"
 	case "chain.VarInt32":
-		format = "    enc.PackVarInt32(int32(t.%s))"
+		format = "enc.PackVarInt32(int32(t.%s))"
 	case "chain.VarUint32":
-		format = "    enc.PackVarUint32(uint32(t.%s))"
+		format = "enc.PackVarUint32(uint32(t.%s))"
 	case "float32":
-		format = "    enc.PackFloat32(t.%s)"
+		format = "enc.PackFloat32(t.%s)"
 	case "float64":
-		format = "    enc.PackFloat64(t.%s)"
+		format = "enc.PackFloat64(t.%s)"
 	case "float128":
-		format = "    enc.WriteBytes(t.%s[:])"
+		format = "enc.WriteBytes(t.%s[:])"
 	case "bytes":
-		format = "    enc.PackBytes(t.%s)"
+		format = "enc.PackBytes(t.%s)"
 	case "string":
-		format = "    enc.PackString(t.%s)"
+		format = "enc.PackString(t.%s)"
 	case "chain.Name":
-		format = "    enc.PackUint64(t.%s.N)"
+		format = "enc.PackUint64(t.%s.N)"
 	case "chain.TimePoint", "chain.TimePointSec",
 		"chain.BlockTimestampType", "chain.Checksum160",
 		"chain.Checksum256", "chain.Checksum512",
 		"chain.PublicKeyType", "chain.Signature",
 		"chain.Symbol", "chain.SymbolCode",
 		"chain.Asset", "chain.ExtendedAsset":
-		format = "    enc.Pack(&t.%s)"
+		format = "enc.Pack(&t.%s)"
 	default:
-		format = "    enc.Pack(&t.%s)"
+		format = "enc.Pack(&t.%s)"
 	}
-	t.writeCode(format, goName)
+	t.writeCode(indent+format, goName)
 }
 
 func (t *CodeGenerator) packArrayType(goName string, goType string) {
 	if goType == "byte" {
 		t.writeCode("    enc.PackBytes(t.%s)", goName)
 	} else {
-		t.writeCode(`
-{
-	enc.PackLength(len(t.%[1]s))
-	for i := range t.%[1]s {`, goName)
-		t.packNotArrayType("    "+goName+"[i]", goType)
+		t.writeCode("{")
+		t.writeCode("    enc.PackLength(len(t.%[1]s))", goName)
+		t.writeCode("    for i := range t.%[1]s {", goName)
+		t.packNotArrayType(goName+"[i]", goType, "        ")
 		t.writeCode("    }")
 		t.writeCode("}")
 	}
@@ -859,14 +880,89 @@ func (t *CodeGenerator) packType(member MemberType) {
 		t.packArrayType(member.Name, member.Type)
 	} else if member.LeadingType == TYPE_ARRAY {
 		t.writeCode("    for i := range t.%s {", member.Name)
-		t.packNotArrayType(member.Name+"[i]", member.Type)
+		t.packNotArrayType(member.Name+"[i]", member.Type, "        ")
 		t.writeCode("    }")
 	} else {
-		t.packNotArrayType(member.Name, member.Type)
+		t.packNotArrayType(member.Name, member.Type, "    ")
 	}
 }
 
-func (t *CodeGenerator) unpackType(member MemberType) {
+func (t *CodeGenerator) unpackType(funcName string, varName string) {
+	t.writeCode("{")
+	t.writeCode("    v, err := dec.%s()", funcName)
+	t.writeCode("    if err != nil {")
+	t.writeCode("        return 0, err")
+	t.writeCode("    }")
+	t.writeCode("    %s = v", varName)
+	t.writeCode("}")
+}
+
+func (t *CodeGenerator) unpackI(varName string) {
+	t.writeCode("{")
+	t.writeCode("    err := dec.UnpackI(&%s)", varName)
+	t.writeCode("    if err != nil {")
+	t.writeCode("        return 0, err")
+	t.writeCode("    }")
+	t.writeCode("}")
+}
+
+func (t *CodeGenerator) unpackBaseType(varName string, typ string) {
+	switch typ {
+	case "bool":
+		t.unpackType("UnpackBool", varName)
+	case "byte":
+		t.unpackType("UnpackUint8", varName)
+	case "int8":
+		t.unpackType("UnpackInt8", varName)
+	case "uint8":
+		t.unpackType("UnpackUint8", varName)
+	case "int16":
+		t.unpackType("UnpackInt16", varName)
+	case "uint16":
+		t.unpackType("UnpackUint16", varName)
+	case "int32":
+		t.unpackType("UnpackInt32", varName)
+	case "uint32":
+		t.unpackType("UnpackUint32", varName)
+	case "int64":
+		t.unpackType("UnpackInt64", varName)
+	case "uint64":
+		t.unpackType("UnpackUint64", varName)
+	case "chain.Name":
+		t.unpackType("UnpackName", varName)
+	case "bytes":
+		t.unpackType("UnpackBytes", varName)
+	case "string":
+		t.unpackType("UnpackString", varName)
+	case "float32":
+		t.unpackType("UnpackFloat32", varName)
+	case "float64":
+		t.unpackType("UnpackFloat64", varName)
+	default:
+		t.unpackI(varName)
+	}
+	// int128
+	// uint128
+	// varint32
+	// varuint32
+	// float32
+	// float64
+	// float128
+	// time_point
+	// time_point_sec
+	// block_timestamp_type
+	// checksum160
+	// checksum256
+	// checksum512
+	// public_key
+	// signature
+	// symbol
+	// symbol_code
+	// asset
+	// extended_asset
+}
+
+func (t *CodeGenerator) unpackMember(member MemberType) {
 	if member.Name == "" {
 		log.Printf("anonymount Type does not supported currently: %s", member.Type)
 		return
@@ -876,15 +972,11 @@ func (t *CodeGenerator) unpackType(member MemberType) {
 		t.writeCode("    length, _ := dec.UnpackLength()")
 		t.writeCode("    t.%s = make([]%s, length)", member.Name, member.Type)
 		t.writeCode("    for i:=0; i<length; i++ {")
-		t.writeCode("        dec.Unpack(&t.%s[i])", member.Name)
+		t.unpackBaseType(fmt.Sprintf("t.%s[i]", member.Name), member.Type)
 		t.writeCode("    }")
 		t.writeCode("}")
-	} else if member.LeadingType == TYPE_ARRAY {
-		t.writeCode("    for i := range t.%s {", member.Name)
-		t.writeCode("        dec.Unpack(&t.%s[i])", member.Name)
-		t.writeCode("    }")
 	} else {
-		t.writeCode("    dec.Unpack(&t.%s)", member.Name)
+		t.unpackBaseType("t."+member.Name, member.Type)
 	}
 }
 
@@ -914,7 +1006,7 @@ func (t *CodeGenerator) genUnpackCode(structName string, members []MemberType) {
 	t.writeCode("func (t *%s) Unpack(data []byte) (int, error) {", structName)
 	t.writeCode("    dec := chain.NewDecoder(data)")
 	for _, member := range members {
-		t.unpackType(member)
+		t.unpackMember(member)
 	}
 	t.writeCode("    return dec.Pos(), nil\n}\n")
 }
