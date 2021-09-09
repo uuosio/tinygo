@@ -17,9 +17,9 @@ func _panic(message interface{}) {
 
 // Cause a runtime panic, which is (currently) always a string.
 func runtimePanic(msg string) {
-	// printstring("panic: runtime error: ")
-	// println(msg)
-	// abort()
+	printstring("panic: runtime error: ")
+	println(msg)
+	abort()
 }
 
 // Try to recover a panicking goroutine.
