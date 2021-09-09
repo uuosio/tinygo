@@ -43,6 +43,7 @@ func _panic(message interface{}) {
 
 // Cause a runtime panic, which is (currently) always a string.
 func runtimePanic(msg string) {
+	eosio_assert(false, "panic: runtime error: "+msg)
 	// printstring("panic: runtime error: ")
 	// println(msg)
 	// abort()
