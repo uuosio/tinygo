@@ -92,3 +92,15 @@ class Test(object):
         self.chain.deploy_contract('hello', code, abi, 0)
         r = self.chain.push_action('hello', 'sayhello', b'hello,world')
         print_console(r)
+
+    def test_interface(self):
+        with open('testinterfaceassertion.go', 'r') as f:
+            code = f.read()
+        code, abi = self.compile('hello', code)
+        self.chain.deploy_contract('hello', code, abi, 0)
+        try:
+            r = self.chain.push_action('hello', 'sayhello', b'hello,world')
+            print_console(r)
+        except Exception as e:
+            error_msg = e.args[0]['action_traces'][0]['except']['stack'][0]['data']['s']
+            assert error_msg == 'panic: runtime error: type assert failed'
