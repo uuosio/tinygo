@@ -1323,7 +1323,10 @@ func (b *builder) createFunctionCall(instr *ssa.CallCommon) (llvm.Value, error) 
 			}
 			arg := llvm.ConstInt(b.ctx.Int64Type(), n, false)
 			argValues = append(argValues, arg)
-			ret := b.createChainCall("newname", argValues, "")
+			ret, err := b.createChainCall("newname", argValues, "")
+			if err != nil {
+				break
+			}
 			return ret, nil
 		case name == "runtime.memcpy" || name == "runtime.memmove" || name == "reflect.memcpy":
 			return b.createMemoryCopyCall(fn, instr.Args)

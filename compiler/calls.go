@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"go/types"
 	"strconv"
 
@@ -45,15 +46,19 @@ func (b *builder) createRuntimeCall(fnName string, args []llvm.Value, name strin
 	return b.createCall(llvmFn, args, name)
 }
 
-func (b *builder) createChainCall(fnName string, args []llvm.Value, name string) llvm.Value {
-	fn := b.program.ImportedPackage("github.com/uuosio/chain").Members[fnName].(*ssa.Function)
+func (b *builder) createChainCall(fnName string, args []llvm.Value, name string) (llvm.Value, error) {
+	fn, ok := b.program.ImportedPackage("github.com/uuosio/chain").Members[fnName].(*ssa.Function)
+	if !ok {
+		return llvm.Value{}, fmt.Errorf("trying to call non-existent function: %s", fnName)
+	}
+
 	llvmFn := b.getFunction(fn)
 	if llvmFn.IsNil() {
 		panic("trying to call non-existent function: " + fn.RelString(nil))
 	}
 	args = append(args, llvm.Undef(b.i8ptrType))            // unused context parameter
 	args = append(args, llvm.ConstPointerNull(b.i8ptrType)) // coroutine handle
-	return b.createCall(llvmFn, args, name)
+	return b.createCall(llvmFn, args, name), nil
 }
 
 // createCall creates a call to the given function with the arguments possibly
