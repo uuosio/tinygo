@@ -45,6 +45,17 @@ func (b *builder) createRuntimeCall(fnName string, args []llvm.Value, name strin
 	return b.createCall(llvmFn, args, name)
 }
 
+func (b *builder) createChainCall(fnName string, args []llvm.Value, name string) llvm.Value {
+	fn := b.program.ImportedPackage("github.com/uuosio/chain").Members[fnName].(*ssa.Function)
+	llvmFn := b.getFunction(fn)
+	if llvmFn.IsNil() {
+		panic("trying to call non-existent function: " + fn.RelString(nil))
+	}
+	args = append(args, llvm.Undef(b.i8ptrType))            // unused context parameter
+	args = append(args, llvm.ConstPointerNull(b.i8ptrType)) // coroutine handle
+	return b.createCall(llvmFn, args, name)
+}
+
 // createCall creates a call to the given function with the arguments possibly
 // expanded.
 func (b *builder) createCall(fn llvm.Value, args []llvm.Value, name string) llvm.Value {

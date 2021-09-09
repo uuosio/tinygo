@@ -1294,6 +1294,37 @@ func (b *builder) createFunctionCall(instr *ssa.CallCommon) (llvm.Value, error) 
 		// applied) function call. If it is anonymous, it may be a closure.
 		name := fn.RelString(nil)
 		switch {
+		case name == "github.com/uuosio/chain.NewName":
+			if len(instr.Args) != 1 {
+				break
+			}
+
+			expr, ok := instr.Args[0].(*ssa.Const)
+			if !ok {
+				break
+			}
+
+			typ, ok := expr.Type().Underlying().(*types.Basic)
+			if !ok {
+				break
+			}
+
+			if (typ.Info() & types.IsString) == 0 {
+				break
+			}
+
+			var argValues []llvm.Value
+			str := constant.StringVal(expr.Value)
+
+			n := s2n(str)
+			if n2s(n) != str {
+				err := b.makeError(instr.Pos(), "Invalid name: "+str)
+				return llvm.Value{}, err
+			}
+			arg := llvm.ConstInt(b.ctx.Int64Type(), n, false)
+			argValues = append(argValues, arg)
+			ret := b.createChainCall("newname", argValues, "")
+			return ret, nil
 		case name == "runtime.memcpy" || name == "runtime.memmove" || name == "reflect.memcpy":
 			return b.createMemoryCopyCall(fn, instr.Args)
 		case name == "runtime.memzero":
