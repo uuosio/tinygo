@@ -74,6 +74,43 @@ func (c *MyContract) testpointer(a *chain.Name) {
 	chain.Println("+++++your name:", *a)
 }
 
+//action testbasetype
+func (c *MyContract) testbasetype(
+	a1 bool,
+	a2 int8,
+	a3 uint8,
+	a4 int16,
+	a5 uint16,
+	a6 int32,
+	a7 uint32,
+	a8 int64,
+	a9 uint64,
+	a10 chain.Int128, // int128
+	a11 chain.Uint128, // uint128
+	a12 chain.VarInt32, // varint32
+	a13 chain.VarUint32, // varuint32
+	a14 float32, // float32
+	a15 float64, // float64
+	a16 chain.Float128, // float128
+	a17 chain.TimePoint, // time_point
+	a18 chain.TimePointSec, // time_point_sec
+	a19 chain.BlockTimestampType, // block_timestamp_type
+	a20 chain.Name, // name
+	a21 byte, // bytes
+	a22 string, // string
+	a23 chain.Checksum160, // checksum160
+	a24 chain.Checksum256, // checksum256
+	a25 chain.Checksum512, // checksum512
+	a26 chain.PublicKey, // public_key
+	a27 chain.Signature, // signature
+	a28 chain.Symbol, // symbol
+	a29 chain.SymbolCode, // symbol_code
+	a30 chain.Asset, // asset
+	a31 chain.ExtendedAsset, // extended_asset
+) {
+
+}
+
 //action testarray
 func (c *MyContract) testarray(
 	a1 []bool,
@@ -108,5 +145,48 @@ func (c *MyContract) testarray(
 	a30 []chain.Asset, // asset
 	a31 []chain.ExtendedAsset, // extended_asset
 ) {
-	chain.Println("+++++your name:", a31)
+
 }
+
+type PermissionLevel struct {
+	Actor      chain.Name
+	Permission chain.Name
+}
+
+type Action struct {
+	Account       chain.Name
+	Name          chain.Name
+	Authorization []PermissionLevel
+	Data          []byte
+}
+
+type TransactionExtension struct {
+	Type uint16
+	Data []byte
+}
+
+type Transaction struct {
+	Expiration     uint32
+	RefBlockNum    uint16
+	RefBlockPrefix uint32
+	//[VLQ or Base-128 encoding](https://en.wikipedia.org/wiki/Variable-length_quantity)
+	//unsigned_int vaint (eosio.cdt/libraries/eosiolib/core/eosio/varint.hpp)
+	MaxNetUsageWords   chain.VarUint32
+	MaxCpuUsageMs      uint8
+	DelaySec           chain.VarUint32 //unsigned_int
+	ContextFreeActions []Action
+	Actions            []Action
+	Extention          []TransactionExtension
+}
+
+//table mytx
+type MyTx struct {
+	Tx Transaction //primary:uint64(t.Tx.Expiration)
+}
+
+//action testignore ignore
+// func (c *MyContract) testignore(
+// 	a1 *Transaction,
+// ) {
+
+// }
