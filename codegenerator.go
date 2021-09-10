@@ -1150,6 +1150,42 @@ func GetIndexType(index string) string {
 	}
 }
 
+func indexTypeToSecondaryType(indexType string) string {
+	switch indexType {
+	case "IDX64":
+		return "uint64"
+	case "IDX128":
+		return "chain.Uint128"
+	case "IDX256":
+		return "chain.Uint256"
+	case "IDXFloat64":
+		return "float64"
+	case "IDXFloat128":
+		return "chain.Float128"
+	default:
+		panic(fmt.Sprintf("unknown secondary index type: %s", indexType))
+	}
+	return ""
+}
+
+func indexTypeToSecondaryDBName(indexType string) string {
+	switch indexType {
+	case "IDX64":
+		return "IdxDB64"
+	case "IDX128":
+		return "IdxDB128"
+	case "IDX256":
+		return "IdxDB256"
+	case "IDXFloat64":
+		return "IdxDBFloat64"
+	case "IDXFloat128":
+		return "IdxDBFloat128"
+	default:
+		panic(fmt.Sprintf("unknown secondary index type: %s", indexType))
+	}
+	return ""
+}
+
 func (t *CodeGenerator) GenCode() error {
 	f, err := os.Create(t.DirName + "/generated.go")
 	if err != nil {
@@ -1327,6 +1363,19 @@ func (mi *%[1]sDB) Update(it database.Iterator, v *%[1]s, payer chain.Name) {
 }
 `, table.StructName, StringToName(table.TableName))
 
+		for i := range table.SecondaryIndexes {
+			index := &table.SecondaryIndexes[i]
+			t.writeCode(`
+func (mi *%[1]sDB) GetIdxDB%[2]s() *database.%[4]sI {
+	secondaryDB := mi.GetIdxDBByIndex(%[3]d)
+	_secondaryDB, ok := secondaryDB.(*database.%[4]s)
+	if !ok {
+		panic("Cannot convert secondary db to *database.%[4]s")
+	}
+	return &database.%[4]sI{secondaryDB, _secondaryDB}
+}
+`, table.StructName, index.Name, i, indexTypeToSecondaryDBName(index.Type))
+		}
 	}
 
 	t.writeCode(`
