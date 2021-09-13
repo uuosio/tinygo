@@ -3,19 +3,28 @@
 package runtime
 
 /*
-	#include <stdint.h>
-	void eosio_assert(int32_t test, const char* msg);
+#include <stdint.h>
+void  eosio_assert_message( uint32_t test, const char* msg, uint32_t msg_len );
 */
 import "C"
 
-func eosio_assert(test bool, msg string) {
-	buf := Alloc(uintptr(len(msg) + 1))
-	pp := (*[1 << 30]byte)(buf)
-	copy(pp[:], msg)
-	pp[len(msg)] = 0
-	if !test {
-		C.eosio_assert(0, (*C.char)(buf))
+import (
+	"unsafe"
+)
+
+type stringHeader struct {
+	data unsafe.Pointer
+	len  uintptr
+}
+
+//Aborts processing of this action and unwinds all pending changes if the test condition is true
+func Assert(test bool, msg string) {
+	_test := uint32(0)
+	if test {
+		_test = 1
 	}
+	_msg := (*stringHeader)(unsafe.Pointer(&msg))
+	C.eosio_assert_message(_test, (*C.char)(_msg.data), C.uint32_t(len(msg)))
 }
 
 // trap is a compiler hint that this function cannot be executed. It is
@@ -28,12 +37,12 @@ func _panic(message interface{}) {
 	switch v := message.(type) {
 	case string:
 		msg := "panic: " + v
-		eosio_assert(false, msg)
+		Assert(false, msg)
 	case error:
 		msg := "panic:" + v.Error()
-		eosio_assert(false, msg)
+		Assert(false, msg)
 	default:
-		eosio_assert(false, "panic")
+		Assert(false, "panic")
 	}
 	// printstring("panic: ")
 	// printitf(message)
@@ -43,7 +52,7 @@ func _panic(message interface{}) {
 
 // Cause a runtime panic, which is (currently) always a string.
 func runtimePanic(msg string) {
-	eosio_assert(false, "panic: runtime error: "+msg)
+	Assert(false, "panic: runtime error: "+msg)
 	// printstring("panic: runtime error: ")
 	// println(msg)
 	// abort()
