@@ -535,7 +535,8 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 			if len(items) == 2 {
 				name := items[1]
 				if t.contractName != "" {
-					log.Printf("contractName %s replace by %s", t.contractName, name)
+					errMsg := fmt.Sprintf("contract name %s replace by %s", t.contractName, name)
+					return t.newError(doc.Pos(), errMsg)
 				}
 				t.contractName = name
 				isContractStruct = true

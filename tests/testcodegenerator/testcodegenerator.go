@@ -43,6 +43,14 @@ type MyContract struct {
 	Action        chain.Name
 }
 
+//test for dumplicated contract name
+//contract test2
+// type MyContract2 struct {
+// 	Receiver      chain.Name
+// 	FirstReceiver chain.Name
+// 	Action        chain.Name
+// }
+
 func NewContract(receiver, firstReceiver, action chain.Name) *MyContract {
 	return &MyContract{receiver, firstReceiver, action}
 }
