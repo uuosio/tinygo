@@ -889,21 +889,13 @@ func (t *CodeGenerator) packType(member MemberType) {
 
 func (t *CodeGenerator) unpackType(funcName string, varName string) {
 	t.writeCode("{")
-	t.writeCode("    v, err := dec.%s()", funcName)
-	t.writeCode("    if err != nil {")
-	t.writeCode("        return 0, err")
-	t.writeCode("    }")
+	t.writeCode("    v := dec.%s()", funcName)
 	t.writeCode("    %s = v", varName)
 	t.writeCode("}")
 }
 
 func (t *CodeGenerator) unpackI(varName string) {
-	t.writeCode("{")
-	t.writeCode("    err := dec.UnpackI(&%s)", varName)
-	t.writeCode("    if err != nil {")
-	t.writeCode("        return 0, err")
-	t.writeCode("    }")
-	t.writeCode("}")
+	t.writeCode("    dec.UnpackI(&%s)", varName)
 }
 
 func (t *CodeGenerator) unpackBaseType(varName string, typ string) {
@@ -971,7 +963,7 @@ func (t *CodeGenerator) unpackMember(member MemberType) {
 	}
 	if member.LeadingType == TYPE_SLICE {
 		t.writeCode("{")
-		t.writeCode("    length, _ := dec.UnpackLength()")
+		t.writeCode("    length := dec.UnpackLength()")
 		t.writeCode("    t.%s = make([]%s, length)", member.Name, member.Type)
 		t.writeCode("    for i:=0; i<length; i++ {")
 		t.unpackBaseType(fmt.Sprintf("t.%s[i]", member.Name), member.Type)
@@ -1005,12 +997,12 @@ func (t *CodeGenerator) genPackCode(structName string, members []MemberType) {
 }
 
 func (t *CodeGenerator) genUnpackCode(structName string, members []MemberType) {
-	t.writeCode("func (t *%s) Unpack(data []byte) (int, error) {", structName)
+	t.writeCode("func (t *%s) Unpack(data []byte) int {", structName)
 	t.writeCode("    dec := chain.NewDecoder(data)")
 	for _, member := range members {
 		t.unpackMember(member)
 	}
-	t.writeCode("    return dec.Pos(), nil\n}\n")
+	t.writeCode("    return dec.Pos()\n}\n")
 }
 
 func (t *CodeGenerator) calcNotArrayMemberSize(name string, goType string) {
@@ -1286,13 +1278,10 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 		}
 
 		t.writeCode(`
-func %[1]sUnpacker(buf []byte) (database.MultiIndexValue, error) {
+func %[1]sUnpacker(buf []byte) database.MultiIndexValue {
 	v := &%[1]s{}
-	_, err := v.Unpack(buf)
-	if err != nil {
-		return nil, err
-	}
-	return v, nil
+	v.Unpack(buf)
+	return v
 }`, table.StructName)
 
 		//generate singleton db code
