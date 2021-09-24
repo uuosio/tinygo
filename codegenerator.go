@@ -317,7 +317,7 @@ type ABI struct {
 	Version          string      `json:"version"`
 	Structs          []ABIStruct `json:"structs"`
 	Types            []string    `json:"types"`
-	actions          []ABIAction `json:"actions"`
+	Actions          []ABIAction `json:"actions"`
 	Tables           []ABITable  `json:"tables"`
 	RicardianClauses []string    `json:"ricardian_clauses"`
 	Variants         []string    `json:"variants"`
@@ -1327,7 +1327,7 @@ func (t *CodeGenerator) GenAbi() error {
 	abi.Structs = make([]ABIStruct, 0, len(t.structs)+len(t.actions))
 
 	abi.Types = []string{}
-	abi.actions = []ABIAction{}
+	abi.Actions = []ABIAction{}
 	abi.Tables = []ABITable{}
 	abi.RicardianClauses = []string{}
 	abi.Variants = []string{}
@@ -1366,13 +1366,13 @@ func (t *CodeGenerator) GenAbi() error {
 		abi.Structs = append(abi.Structs, s)
 	}
 
-	abi.actions = make([]ABIAction, 0, len(t.actions))
+	abi.Actions = make([]ABIAction, 0, len(t.actions))
 	for _, action := range t.actions {
 		a := ABIAction{}
 		a.Name = action.ActionName
 		a.Type = action.ActionName
 		a.RicardianContract = ""
-		abi.actions = append(abi.actions, a)
+		abi.Actions = append(abi.Actions, a)
 	}
 
 	for _, table := range t.structs {
