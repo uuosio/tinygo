@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -1398,27 +1399,25 @@ func (t *CodeGenerator) GenAbi() error {
 
 func (t *CodeGenerator) FetchAllGoFiles(dir string) []string {
 	goFiles := []string{}
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+	for _, f := range files {
+		if f.IsDir() {
+			continue
 		}
 
-		if info.IsDir() {
-			return nil
+		if filepath.Ext(f.Name()) != ".go" {
+			continue
 		}
 
-		if filepath.Ext(path) != ".go" {
-			return nil
+		if f.Name() == "generated.go" {
+			continue
 		}
-
-		if info.Name() == "generated.go" {
-			return nil
-		}
-		goFiles = append(goFiles, path)
-		println(path, info.Name())
-		return nil
-	})
+		goFiles = append(goFiles, f.Name())
+	}
 	return goFiles
 }
 
