@@ -1282,7 +1282,7 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 			continue
 		}
 
-		t.writeCode(cDBTemplate, table.StructName, StringToName(table.TableName))
+		t.writeCode(cDBTemplate, table.StructName, StringToName(table.TableName), table.TableName)
 
 		for i := range table.SecondaryIndexes {
 			index := &table.SecondaryIndexes[i]

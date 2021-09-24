@@ -7,7 +7,7 @@ type %[1]sDB struct {
 }
 
 func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
-	table := chain.Name{N:uint64(%[2]d)}
+	table := chain.Name{N:uint64(%[2]d)} //table name: %[3]s
 	db := database.NewMultiIndex(code, scope, table, %[1]sDBNameToIndex, %[1]sSecondaryTypes, %[1]sUnpacker)
 	return &%[1]sDB{db, db}
 }
