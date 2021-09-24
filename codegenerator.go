@@ -269,15 +269,16 @@ type StructInfo struct {
 }
 
 type CodeGenerator struct {
-	DirName      string
+	dirName      string
+	currentFile  string
 	contractName string
 	fset         *token.FileSet
 	codeFile     *os.File
-	Actions      []ActionInfo
-	Structs      []StructInfo
+	actions      []ActionInfo
+	structs      []StructInfo
 	structMap    map[string]*StructInfo
 
-	HasMainFunc        bool
+	hasMainFunc        bool
 	abiStructsMap      map[string]*StructInfo
 	actionMap          map[string]bool
 	contractStructName string
@@ -315,7 +316,7 @@ type ABI struct {
 	Version          string      `json:"version"`
 	Structs          []ABIStruct `json:"structs"`
 	Types            []string    `json:"types"`
-	Actions          []ABIAction `json:"actions"`
+	actions          []ABIAction `json:"actions"`
 	Tables           []ABITable  `json:"tables"`
 	RicardianClauses []string    `json:"ricardian_clauses"`
 	Variants         []string    `json:"variants"`
@@ -621,7 +622,7 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				return err
 			}
 		}
-		t.Structs = append(t.Structs, info)
+		t.structs = append(t.structs, info)
 	}
 	return nil
 }
@@ -638,7 +639,7 @@ func (t *CodeGenerator) getLineInfo(p token.Pos) string {
 
 func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	if f.Name.Name == "main" {
-		t.HasMainFunc = true
+		t.hasMainFunc = true
 	} else if f.Name.Name == "NewContract" {
 		t.hasNewContractFunc = true
 	}
@@ -710,11 +711,12 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 			return err
 		}
 	}
-	t.Actions = append(t.Actions, action)
+	t.actions = append(t.actions, action)
 	return nil
 }
 
 func (t *CodeGenerator) ParseGoFile(goFile string) error {
+	t.currentFile = goFile
 	file, err := parser.ParseFile(t.fset, goFile, nil, parser.ParseComments)
 	if err != nil {
 		return err
@@ -751,7 +753,7 @@ func (t *CodeGenerator) writeCode(format string, a ...interface{}) {
 
 func (t *CodeGenerator) genActionCode(notify bool) error {
 	t.writeCode("        switch action.N {")
-	for _, action := range t.Actions {
+	for _, action := range t.actions {
 		if action.IsNotify == notify {
 		} else {
 			continue
@@ -1180,33 +1182,33 @@ func indexTypeToSecondaryDBName(indexType string) string {
 }
 
 func (t *CodeGenerator) GenCode() error {
-	f, err := os.Create(t.DirName + "/generated.go")
+	f, err := os.Create(t.dirName + "/generated.go")
 	if err != nil {
 		return err
 	}
 	t.codeFile = f
 
-	for _, info := range t.Structs {
+	for _, info := range t.structs {
 		log.Println("++struct:", info.StructName)
 	}
 
 	t.writeCode(cImportCode)
 
-	for _, action := range t.Actions {
+	for _, action := range t.actions {
 		t.genStruct(action.ActionName, action.Members)
 		t.genPackCode(action.ActionName, action.Members)
 		t.genUnpackCode(action.ActionName, action.Members)
 		t.genSizeCode(action.ActionName, action.Members)
 	}
 
-	for _, _struct := range t.Structs {
+	for _, _struct := range t.structs {
 		t.genPackCode(_struct.StructName, _struct.Members)
 		t.genUnpackCode(_struct.StructName, _struct.Members)
 		t.genSizeCode(_struct.StructName, _struct.Members)
 	}
 
-	for i := range t.Structs {
-		table := &t.Structs[i]
+	for i := range t.structs {
+		table := &t.structs[i]
 		if table.TableName == "" {
 			continue
 		}
@@ -1289,7 +1291,7 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 
 	t.writeCode(cDummyCode)
 
-	if t.HasMainFunc {
+	if t.hasMainFunc {
 		return nil
 	}
 
@@ -1309,9 +1311,9 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 func (t *CodeGenerator) GenAbi() error {
 	var abiFile string
 	if t.contractName == "" {
-		abiFile = t.DirName + "/generated.abi"
+		abiFile = t.dirName + "/generated.abi"
 	} else {
-		abiFile = t.DirName + "/" + t.contractName + ".abi"
+		abiFile = t.dirName + "/" + t.contractName + ".abi"
 	}
 
 	f, err := os.Create(abiFile)
@@ -1321,10 +1323,10 @@ func (t *CodeGenerator) GenAbi() error {
 
 	abi := ABI{}
 	abi.Version = "eosio::abi/1.1"
-	abi.Structs = make([]ABIStruct, 0, len(t.Structs)+len(t.Actions))
+	abi.Structs = make([]ABIStruct, 0, len(t.structs)+len(t.actions))
 
 	abi.Types = []string{}
-	abi.Actions = []ABIAction{}
+	abi.actions = []ABIAction{}
 	abi.Tables = []ABITable{}
 	abi.RicardianClauses = []string{}
 	abi.Variants = []string{}
@@ -1347,7 +1349,7 @@ func (t *CodeGenerator) GenAbi() error {
 		abi.Structs = append(abi.Structs, s)
 	}
 
-	for _, action := range t.Actions {
+	for _, action := range t.actions {
 		s := ABIStruct{}
 		s.Name = action.ActionName
 		s.Base = ""
@@ -1363,16 +1365,16 @@ func (t *CodeGenerator) GenAbi() error {
 		abi.Structs = append(abi.Structs, s)
 	}
 
-	abi.Actions = make([]ABIAction, 0, len(t.Actions))
-	for _, action := range t.Actions {
+	abi.actions = make([]ABIAction, 0, len(t.actions))
+	for _, action := range t.actions {
 		a := ABIAction{}
 		a.Name = action.ActionName
 		a.Type = action.ActionName
 		a.RicardianContract = ""
-		abi.Actions = append(abi.Actions, a)
+		abi.actions = append(abi.actions, a)
 	}
 
-	for _, table := range t.Structs {
+	for _, table := range t.structs {
 		if table.TableName == "" {
 			continue
 		}
@@ -1435,12 +1437,12 @@ func (t *CodeGenerator) addAbiStruct(s *StructInfo) {
 }
 
 func (t *CodeGenerator) Analyse() {
-	for i := range t.Structs {
-		s := &t.Structs[i]
+	for i := range t.structs {
+		s := &t.structs[i]
 		t.structMap[s.StructName] = s
 	}
 
-	for _, action := range t.Actions {
+	for _, action := range t.actions {
 		for _, member := range action.Members {
 			item, ok := t.structMap[member.Type]
 			if ok {
@@ -1449,7 +1451,7 @@ func (t *CodeGenerator) Analyse() {
 		}
 	}
 
-	for _, item := range t.Structs {
+	for _, item := range t.structs {
 		if item.TableName == "" {
 			continue
 		}
@@ -1466,15 +1468,12 @@ func GenerateCode(inFile string) error {
 	gen.fset = token.NewFileSet()
 
 	if filepath.Ext(inFile) == ".go" {
-		ext := filepath.Ext(inFile)
-		if ext == ".go" {
-		}
-		gen.DirName = filepath.Dir(inFile)
+		gen.dirName = filepath.Dir(inFile)
 		if err := gen.ParseGoFile(inFile); err != nil {
 			return err
 		}
 	} else {
-		gen.DirName = inFile
+		gen.dirName = inFile
 		goFiles := gen.FetchAllGoFiles(inFile)
 		for _, f := range goFiles {
 			if err := gen.ParseGoFile(f); err != nil {
