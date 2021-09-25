@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -1387,6 +1388,27 @@ func (t *CodeGenerator) GenAbi() error {
 		abiTable.KeyTypes = []string{}
 		abi.Tables = append(abi.Tables, abiTable)
 	}
+
+	sort.Slice(abi.Structs, func(i, j int) bool {
+		return strings.Compare(abi.Structs[i].Name, abi.Structs[j].Name) < 0
+	})
+
+	sort.Slice(abi.Types, func(i, j int) bool {
+		return strings.Compare(abi.Types[i], abi.Types[j]) < 0
+	})
+
+	sort.Slice(abi.Actions, func(i, j int) bool {
+		return strings.Compare(abi.Actions[i].Name, abi.Actions[j].Name) < 0
+	})
+
+	sort.Slice(abi.Tables, func(i, j int) bool {
+		return strings.Compare(abi.Tables[i].Name, abi.Tables[j].Name) < 0
+	})
+
+	// Structs          []ABIStruct `json:"structs"`
+	// Types            []string    `json:"types"`
+	// Actions          []ABIAction `json:"actions"`
+	// Tables           []ABITable  `json:"tables"`
 
 	result, err := json.MarshalIndent(abi, "", "    ")
 	if err != nil {
