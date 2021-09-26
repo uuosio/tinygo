@@ -1057,7 +1057,7 @@ func (t *CodeGenerator) calcNotArrayMemberSize(name string, goType string) {
 	default:
 		code = fmt.Sprintf("	size += t.%[1]s.Size()", name)
 	}
-	t.writeCode(code)
+	t.writeCode(code + " //" + name)
 }
 
 func (t *CodeGenerator) calcArrayMemberSize(name string, goType string) {
