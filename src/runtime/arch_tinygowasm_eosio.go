@@ -1,4 +1,4 @@
-// +build !eosio
+// +build eosio
 // +build tinygo.wasm
 
 package runtime
@@ -34,9 +34,7 @@ var (
 const wasmPageSize = 64 * 1024
 
 func align(ptr uintptr) uintptr {
-	// Align to 16, which is the alignment of max_align_t:
-	// https://godbolt.org/z/dYqTsWrGq
-	const heapAlign = 16
+	const heapAlign = 8
 	return (ptr + heapAlign - 1) &^ (heapAlign - 1)
 }
 
