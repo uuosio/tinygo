@@ -100,7 +100,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 		AutomaticStackSize: config.AutomaticStackSize(),
 		DefaultStackSize:   config.Target.DefaultStackSize,
 		NeedsStackObjects:  config.NeedsStackObjects(),
-		Debug:              config.Debug(),
+		Debug:              true,
 		LLVMFeatures:       config.LLVMFeatures(),
 	}
 
@@ -123,11 +123,6 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	if err != nil {
 		return err
 	}
-
-	// The slice of jobs that orchestrates most of the build.
-	// This is somewhat like an in-memory Makefile with each job being a
-	// Makefile target.
-	var jobs []*compileJob
 
 	// Create the *ssa.Program. This does not yet build the entire SSA of the
 	// program so it's pretty fast and doesn't need to be parallelized.
@@ -311,7 +306,6 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 				return os.Rename(f.Name(), bitcodePath)
 			},
 		}
-		jobs = append(jobs, job)
 		packageJobs = append(packageJobs, job)
 	}
 
@@ -402,14 +396,13 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 			return nil
 		},
 	}
-	jobs = append(jobs, programJob)
 
 	// Check whether we only need to create an object file.
 	// If so, we don't need to link anything and will be finished quickly.
 	outext := filepath.Ext(outpath)
 	if outext == ".o" || outext == ".bc" || outext == ".ll" {
 		// Run jobs to produce the LLVM module.
-		err := runJobs(jobs)
+		err := runJobs(programJob)
 		if err != nil {
 			return err
 		}
@@ -450,7 +443,6 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 			return ioutil.WriteFile(objfile, llvmBuf.Bytes(), 0666)
 		},
 	}
-	jobs = append(jobs, outputObjectFileJob)
 
 	// Prepare link command.
 	linkerDependencies := []*compileJob{outputObjectFileJob}
@@ -465,44 +457,13 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 		if err != nil {
 			return err
 		}
-		jobs = append(jobs, job.dependencies...)
-		jobs = append(jobs, job)
 		linkerDependencies = append(linkerDependencies, job)
-	}
-
-	// Add libc dependency if needed.
-	root := goenv.Get("TINYGOROOT")
-	switch config.Target.Libc {
-	case "picolibc":
-		job, err := Picolibc.load(config.Triple(), config.CPU(), dir)
-		if err != nil {
-			return err
-		}
-		// The library needs to be compiled (cache miss).
-		jobs = append(jobs, job.dependencies...)
-		jobs = append(jobs, job)
-		linkerDependencies = append(linkerDependencies, job)
-	case "wasi-libc":
-		path := filepath.Join(root, "lib/wasi-libc/sysroot/lib/wasm32-wasi/libc.a")
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return errors.New("could not find wasi-libc, perhaps you need to run `make wasi-libc`?")
-		}
-		ldflags = append(ldflags, path)
-	case "wasi-libc-eosio":
-		path := filepath.Join(root, "lib/wasi-libc-eosio/sysroot/lib/wasm32-wasi/libc.a")
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return errors.New("could not find wasi-libc-eosio, perhaps you need to run `make wasi-libc-eosio`?")
-		}
-		ldflags = append(ldflags, path)
-	case "":
-		// no library specified, so nothing to do
-	default:
-		return fmt.Errorf("unknown libc: %s", config.Target.Libc)
 	}
 
 	// Add jobs to compile extra files. These files are in C or assembly and
 	// contain things like the interrupt vector table and low level operations
 	// such as stack switching.
+	root := goenv.Get("TINYGOROOT")
 	for _, path := range config.ExtraFiles() {
 		abspath := filepath.Join(root, path)
 		job := &compileJob{
@@ -513,7 +474,6 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 				return err
 			},
 		}
-		jobs = append(jobs, job)
 		linkerDependencies = append(linkerDependencies, job)
 	}
 
@@ -532,7 +492,6 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 					return err
 				},
 			}
-			jobs = append(jobs, job)
 			linkerDependencies = append(linkerDependencies, job)
 		}
 	}
@@ -543,9 +502,70 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 		ldflags = append(ldflags, lprogram.LDFlags...)
 	}
 
+	// Add libc dependency if needed.
+	switch config.Target.Libc {
+	case "picolibc":
+		job, err := Picolibc.load(config.Triple(), config.CPU(), dir)
+		if err != nil {
+			return err
+		}
+		linkerDependencies = append(linkerDependencies, job)
+	case "wasi-libc":
+		path := filepath.Join(root, "lib/wasi-libc/sysroot/lib/wasm32-wasi/libc.a")
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return errors.New("could not find wasi-libc, perhaps you need to run `make wasi-libc`?")
+		}
+		job := dummyCompileJob(path)
+		linkerDependencies = append(linkerDependencies, job)
+	case "wasi-libc-eosio":
+		path := filepath.Join(root, "lib/wasi-libc-eosio/sysroot/lib/wasm32-wasi/libc.a")
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return errors.New("could not find wasi-libc-eosio, perhaps you need to run `make wasi-libc-eosio`?")
+		}
+		job := dummyCompileJob(path)
+		linkerDependencies = append(linkerDependencies, job)
+	case "":
+		// no library specified, so nothing to do
+	default:
+		return fmt.Errorf("unknown libc: %s", config.Target.Libc)
+	}
+
+	// Strip debug information with -no-debug.
+	if !config.Debug() {
+		for _, tag := range config.BuildTags() {
+			if tag == "baremetal" {
+				// Don't use -no-debug on baremetal targets. It makes no sense:
+				// the debug information isn't flashed to the device anyway.
+				return fmt.Errorf("stripping debug information is unnecessary for baremetal targets")
+			}
+		}
+		if config.Target.Linker == "wasm-ld" {
+			// Don't just strip debug information, also compress relocations
+			// while we're at it. Relocations can only be compressed when debug
+			// information is stripped.
+			ldflags = append(ldflags, "--strip-debug", "--compress-relocations")
+		} else {
+			switch config.GOOS() {
+			case "linux":
+				// Either real linux or an embedded system (like AVR) that
+				// pretends to be Linux. It's a ELF linker wrapped by GCC in any
+				// case.
+				ldflags = append(ldflags, "-Wl,--strip-debug")
+			case "darwin":
+				// MacOS (darwin) doesn't have a linker flag to strip debug
+				// information. Apple expects you to use the strip command
+				// instead.
+				return errors.New("cannot remove debug information: MacOS doesn't suppor this linker flag")
+			default:
+				// Other OSes may have different flags.
+				return errors.New("cannot remove debug information: unknown OS: " + config.GOOS())
+			}
+		}
+	}
+
 	// Create a linker job, which links all object files together and does some
 	// extra stuff that can only be done after linking.
-	jobs = append(jobs, &compileJob{
+	linkJob := &compileJob{
 		description:  "link",
 		dependencies: linkerDependencies,
 		run: func(job *compileJob) error {
@@ -618,12 +638,12 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 
 			return nil
 		},
-	})
+	}
 
 	// Run all jobs to compile and link the program.
 	// Do this now (instead of after elf-to-hex and similar conversions) as it
 	// is simpler and cannot be parallelized.
-	err = runJobs(jobs)
+	err = runJobs(linkJob)
 	if err != nil {
 		return err
 	}
@@ -648,7 +668,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 		if err != nil {
 			return err
 		}
-	case "esp32", "esp8266":
+	case "esp32", "esp32c3", "esp8266":
 		// Special format for the ESP family of chips (parsed by the ROM
 		// bootloader).
 		tmppath = filepath.Join(dir, "main"+outext)
@@ -959,15 +979,19 @@ func modifyStackSizes(executable string, stackSizeLoads []string, stackSizes map
 		if fn.stackSizeType == stacksize.Bounded {
 			stackSize := uint32(fn.stackSize)
 
-			// Adding 4 for the stack canary. Even though the size may be
-			// automatically determined, stack overflow checking is still
-			// important as the stack size cannot be determined for all
-			// goroutines.
-			stackSize += 4
-
 			// Add stack size used by interrupts.
 			switch fileHeader.Machine {
 			case elf.EM_ARM:
+				if stackSize%8 != 0 {
+					// If the stack isn't a multiple of 8, it means the leaf
+					// function with the biggest stack depth doesn't have an aligned
+					// stack. If the STKALIGN flag is set (which it is by default)
+					// the interrupt controller will forcibly align the stack before
+					// storing in-use registers. This will thus overwrite one word
+					// past the end of the stack (off-by-one).
+					stackSize += 4
+				}
+
 				// On Cortex-M (assumed here), this stack size is 8 words or 32
 				// bytes. This is only to store the registers that the interrupt
 				// may modify, the interrupt will switch to the interrupt stack
@@ -975,6 +999,14 @@ func modifyStackSizes(executable string, stackSizeLoads []string, stackSizes map
 				// Some background:
 				// https://interrupt.memfault.com/blog/cortex-m-rtos-context-switching
 				stackSize += 32
+
+				// Adding 4 for the stack canary, and another 4 to keep the
+				// stack aligned. Even though the size may be automatically
+				// determined, stack overflow checking is still important as the
+				// stack size cannot be determined for all goroutines.
+				stackSize += 8
+			default:
+				return fmt.Errorf("unknown architecture: %s", fileHeader.Machine.String())
 			}
 
 			// Finally write the stack size to the binary.

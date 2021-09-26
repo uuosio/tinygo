@@ -206,9 +206,11 @@ func mergeDirectory(goroot, tinygoroot, tmpgoroot, importPath string, overrides 
 
 // needsSyscallPackage returns whether the syscall package should be overriden
 // with the TinyGo version. This is the case on some targets.
+// needsSyscallPackage returns whether the syscall package should be overriden
+// with the TinyGo version. This is the case on some targets.
 func needsSyscallPackage(buildTags []string) bool {
 	for _, tag := range buildTags {
-		if tag == "baremetal" || tag == "darwin" || tag == "nintendoswitch" || tag == "wasi" || tag == "eosio" {
+		if tag == "baremetal" || tag == "darwin" || tag == "nintendoswitch" || tag == "tinygo.wasm" {
 			return true
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -258,7 +259,7 @@ func Build(pkgName, outpath string, options *compileopts.Options) error {
 
 // Test runs the tests in the given package. Returns whether the test passed and
 // possibly an error if the test failed to run.
-func Test(pkgName string, options *compileopts.Options, testCompileOnly bool, outpath string) (bool, error) {
+func Test(pkgName string, options *compileopts.Options, testCompileOnly, testVerbose bool, outpath string) (bool, error) {
 	options.TestConfig.CompileTestBinary = true
 	config, err := builder.NewConfig(options)
 	if err != nil {
@@ -284,7 +285,7 @@ func Test(pkgName string, options *compileopts.Options, testCompileOnly bool, ou
 		// Run the test.
 		start := time.Now()
 		var err error
-		passed, err = runPackageTest(config, result)
+		passed, err = runPackageTest(config, result, testVerbose)
 		if err != nil {
 			return err
 		}
@@ -310,10 +311,14 @@ func Test(pkgName string, options *compileopts.Options, testCompileOnly bool, ou
 // runPackageTest runs a test binary that was previously built. The return
 // values are whether the test passed and any errors encountered while trying to
 // run the binary.
-func runPackageTest(config *compileopts.Config, result builder.BuildResult) (bool, error) {
+func runPackageTest(config *compileopts.Config, result builder.BuildResult, testVerbose bool) (bool, error) {
 	if len(config.Target.Emulator) == 0 {
 		// Run directly.
-		cmd := executeCommand(config.Options, result.Binary)
+		var flags []string
+		if testVerbose {
+			flags = append(flags, "-test.v")
+		}
+		cmd := executeCommand(config.Options, result.Binary, flags...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Dir = result.MainDir
@@ -329,6 +334,7 @@ func runPackageTest(config *compileopts.Config, result builder.BuildResult) (boo
 		return true, nil
 	} else {
 		// Run in an emulator.
+		// TODO: pass the -test.v flag if needed.
 		args := append(config.Target.Emulator[1:], result.Binary)
 		cmd := executeCommand(config.Options, config.Target.Emulator[0], args...)
 		buf := &bytes.Buffer{}
@@ -388,6 +394,8 @@ func Flash(pkgName, port string, options *compileopts.Options) error {
 		fileExt = filepath.Ext(config.Target.FlashFilename)
 	case "openocd":
 		fileExt = ".hex"
+	case "bmp":
+		fileExt = ".elf"
 	case "native":
 		return errors.New("unknown flash method \"native\" - did you miss a -target flag?")
 	default:
@@ -480,6 +488,25 @@ func Flash(pkgName, port string, options *compileopts.Options) error {
 				return &commandError{"failed to flash", result.Binary, err}
 			}
 			return nil
+		case "bmp":
+			gdb, err := config.Target.LookupGDB()
+			if err != nil {
+				return err
+			}
+			var bmpGDBPort string
+			bmpGDBPort, _, err = getBMPPorts()
+			if err != nil {
+				return err
+			}
+			args := []string{"-ex", "target extended-remote " + bmpGDBPort, "-ex", "monitor swdp_scan", "-ex", "attach 1", "-ex", "load", filepath.ToSlash(result.Binary)}
+			cmd := executeCommand(config.Options, gdb, args...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			err = cmd.Run()
+			if err != nil {
+				return &commandError{"failed to flash", result.Binary, err}
+			}
+			return nil
 		default:
 			return fmt.Errorf("unknown flash method: %s", flashMethod)
 		}
@@ -534,6 +561,13 @@ func FlashGDB(pkgName string, ocdOutput bool, options *compileopts.Options) erro
 		switch gdbInterface {
 		case "native":
 			// Run GDB directly.
+		case "bmp":
+			var bmpGDBPort string
+			bmpGDBPort, _, err = getBMPPorts()
+			if err != nil {
+				return err
+			}
+			gdbCommands = append(gdbCommands, "target extended-remote "+bmpGDBPort, "monitor swdp_scan", "compare-sections", "attach 1", "load")
 		case "openocd":
 			gdbCommands = append(gdbCommands, "target extended-remote :3333", "monitor halt", "load", "monitor reset halt")
 
@@ -941,6 +975,35 @@ func getDefaultPort(portFlag string, usbInterfaces []string) (port string, err e
 	return "", errors.New("port you specified '" + strings.Join(portCandidates, ",") + "' does not exist, available ports are " + strings.Join(ports, ", "))
 }
 
+// getBMPPorts returns BlackMagicProbe's serial ports if any
+func getBMPPorts() (gdbPort, uartPort string, err error) {
+	var portsList []*enumerator.PortDetails
+	portsList, err = enumerator.GetDetailedPortsList()
+	if err != nil {
+		return "", "", err
+	}
+	var ports []string
+	for _, p := range portsList {
+		if !p.IsUSB {
+			continue
+		}
+		if p.VID != "" && p.PID != "" {
+			vid, vidErr := strconv.ParseUint(p.VID, 16, 16)
+			pid, pidErr := strconv.ParseUint(p.PID, 16, 16)
+			if vidErr == nil && pidErr == nil && vid == 0x1d50 && pid == 0x6018 {
+				ports = append(ports, p.Name)
+			}
+		}
+	}
+	if len(ports) == 2 {
+		return ports[0], ports[1], nil
+	} else if len(ports) == 0 {
+		return "", "", errors.New("no BMP detected")
+	} else {
+		return "", "", fmt.Errorf("expected 2 BMP serial ports, found %d - did you perhaps connect more than one BMP?", len(ports))
+	}
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, "TinyGo is a Go compiler for small places.")
 	fmt.Fprintln(os.Stderr, "version:", goenv.Version)
@@ -1119,7 +1182,7 @@ func main() {
 	printStacks := flag.Bool("print-stacks", false, "print stack sizes of goroutines")
 	printAllocsString := flag.String("print-allocs", "", "regular expression of functions for which heap allocations should be printed")
 	printCommands := flag.Bool("x", false, "Print commands")
-	nodebug := flag.Bool("no-debug", false, "disable DWARF debug symbol generation")
+	nodebug := flag.Bool("no-debug", false, "strip debug information")
 	ocdCommandsString := flag.String("ocd-commands", "", "OpenOCD commands, overriding target spec (can specify multiple separated by commas)")
 	ocdOutput := flag.Bool("ocd-output", false, "print OCD daemon output during debug")
 	port := flag.String("port", "", "flash port (can specify multiple candidates separated by commas)")
@@ -1127,6 +1190,7 @@ func main() {
 	ldflags := flag.String("ldflags", "", "Go link tool compatible ldflags")
 	wasmAbi := flag.String("wasm-abi", "", "WebAssembly ABI conventions: js (no i64 params) or generic")
 	llvmFeatures := flag.String("llvm-features", "", "comma separated LLVM features to enable")
+	cpuprofile := flag.String("cpuprofile", "", "cpuprofile output")
 	genCode := flag.Bool("gen-code", true, "Generate extra code for Smart Contracts")
 	strip := flag.Bool("strip", true, "Strip Custom Section of Wasm File")
 
@@ -1140,9 +1204,10 @@ func main() {
 	if command == "help" || command == "build" || command == "build-library" || command == "test" {
 		flag.StringVar(&outpath, "o", "", "output filename")
 	}
-	var testCompileOnlyFlag *bool
+	var testCompileOnlyFlag, testVerboseFlag *bool
 	if command == "help" || command == "test" {
 		testCompileOnlyFlag = flag.Bool("c", false, "compile the test binary but do not run it")
+		testVerboseFlag = flag.Bool("v", false, "verbose: print additional output")
 	}
 
 	// Early command processing, before commands are interpreted by the Go flag
@@ -1212,6 +1277,20 @@ func main() {
 		fmt.Fprintln(os.Stderr, err.Error())
 		usage()
 		os.Exit(1)
+	}
+
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "could not create CPU profile: ", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fmt.Fprintln(os.Stderr, "could not start CPU profile: ", err)
+			os.Exit(1)
+		}
+		defer pprof.StopCPUProfile()
 	}
 
 	switch command {
@@ -1315,7 +1394,7 @@ func main() {
 		allTestsPassed := true
 		for _, pkgName := range pkgNames {
 			// TODO: parallelize building the test binaries
-			passed, err := Test(pkgName, options, *testCompileOnlyFlag, outpath)
+			passed, err := Test(pkgName, options, *testCompileOnlyFlag, *testVerboseFlag, outpath)
 			handleCompilerError(err)
 			if !passed {
 				allTestsPassed = false

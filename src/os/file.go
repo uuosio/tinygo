@@ -10,6 +10,15 @@ import (
 	"syscall"
 )
 
+// Seek whence values.
+//
+// Deprecated: Use io.SeekStart, io.SeekCurrent, and io.SeekEnd.
+const (
+	SEEK_SET int = io.SeekStart
+	SEEK_CUR int = io.SeekCurrent
+	SEEK_END int = io.SeekEnd
+)
+
 // Mkdir creates a directory. If the operation fails, it will return an error of
 // type *PathError.
 func Mkdir(path string, perm FileMode) error {
@@ -22,6 +31,11 @@ func Mkdir(path string, perm FileMode) error {
 		return &PathError{"mkdir", path, err}
 	}
 	return nil
+}
+
+// MkdirTemp is a stub, it will always return an error.
+func MkdirTemp(dir, pattern string) (string, error) {
+	return "", &PathError{"mkdirtemp", dir, ErrNotImplemented}
 }
 
 // Remove removes a file or (empty) directory. If the operation fails, it will

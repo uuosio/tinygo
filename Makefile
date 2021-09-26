@@ -100,7 +100,7 @@ endif
 clean:
 	@rm -rf build
 
-FMT_PATHS = ./*.go builder cgo compiler interp loader src/device/arm src/examples src/machine src/os src/reflect src/runtime src/sync src/syscall src/internal/reflectlite transform
+FMT_PATHS = ./*.go builder cgo compiler interp loader src/device/arm src/examples src/machine src/os src/reflect src/runtime src/sync src/syscall src/testing src/internal/reflectlite transform
 fmt:
 	@gofmt -l -w $(FMT_PATHS)
 fmt-check:
@@ -124,6 +124,7 @@ build/gen-device-svd: ./tools/gen-device-svd/*.go
 
 gen-device-esp: build/gen-device-svd
 	./build/gen-device-svd -source=https://github.com/posborne/cmsis-svd/tree/master/data/Espressif-Community -interrupts=software lib/cmsis-svd/data/Espressif-Community/ src/device/esp/
+	./build/gen-device-svd -source=https://github.com/posborne/cmsis-svd/tree/master/data/Espressif -interrupts=software lib/cmsis-svd/data/Espressif/ src/device/esp/
 	GO111MODULE=off $(GO) fmt ./src/device/esp
 
 gen-device-nrf: build/gen-device-svd
@@ -201,6 +202,10 @@ TEST_PACKAGES = \
 	container/list \
 	container/ring \
 	crypto/des \
+	crypto/md5 \
+	crypto/sha1 \
+	crypto/sha256 \
+	crypto/sha512 \
 	encoding \
 	encoding/ascii85 \
 	encoding/base32 \
@@ -210,6 +215,7 @@ TEST_PACKAGES = \
 	hash/crc64 \
 	math \
 	math/cmplx \
+	testing \
 	text/scanner \
 	unicode/utf8 \
 
@@ -369,6 +375,8 @@ smoketest:
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=arduino-nano33      examples/blinky1
 	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=arduino-mkrwifi1010 examples/blinky1
+	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=pico                examples/blinky1
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=nano-33-ble         examples/blinky1
@@ -436,6 +444,8 @@ ifneq ($(XTENSA), 0)
 	$(TINYGO) build -size short -o test.bin -target=nodemcu             examples/blinky1
 	@$(MD5SUM) test.bin
 endif
+	$(TINYGO) build -size short -o test.bin -target=esp32c3           	examples/serial
+	@$(MD5SUM) test.bin
 	$(TINYGO) build -size short -o test.hex -target=hifive1b            examples/blinky1
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=hifive1-qemu        examples/serial
@@ -455,6 +465,9 @@ endif
 	@$(MD5SUM) test.nro
 	$(TINYGO) build -size short -o test.hex -target=pca10040 -opt=0     ./testdata/stdlib.go
 	@$(MD5SUM) test.hex
+ifneq ($(OS),Windows_NT)
+	$(TINYGO) build -o test.elf -gc=leaking -scheduler=none examples/serial
+endif
 
 
 wasmtest:

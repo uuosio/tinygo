@@ -16,8 +16,9 @@ func usleep(usec uint) int
 //export malloc
 func malloc(size uintptr) unsafe.Pointer
 
+// void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
 //export mmap
-func mmap(addr unsafe.Pointer, length, prot, flags, fd int, offset int) unsafe.Pointer
+func mmap(addr unsafe.Pointer, length uintptr, prot, flags, fd int, offset int) unsafe.Pointer
 
 //export abort
 func abort()
@@ -37,8 +38,6 @@ type timespec struct {
 	tv_sec  int // time_t: follows the platform bitness
 	tv_nsec int // long: on Linux and macOS, follows the platform bitness
 }
-
-const CLOCK_MONOTONIC_RAW = 4
 
 var stackTop uintptr
 
@@ -138,17 +137,29 @@ func sleepTicks(d timeUnit) {
 	usleep(uint(d) / 1000)
 }
 
-// Return monotonic time in nanoseconds.
-//
-// TODO: noescape
-func monotime() uint64 {
+func getTime(clock int32) uint64 {
 	ts := timespec{}
-	clock_gettime(CLOCK_MONOTONIC_RAW, &ts)
+	clock_gettime(clock, &ts)
 	return uint64(ts.tv_sec)*1000*1000*1000 + uint64(ts.tv_nsec)
+}
+
+// Return monotonic time in nanoseconds.
+func monotime() uint64 {
+	return getTime(clock_MONOTONIC_RAW)
 }
 
 func ticks() timeUnit {
 	return timeUnit(monotime())
+}
+
+//go:linkname now time.now
+func now() (sec int64, nsec int32, mono int64) {
+	ts := timespec{}
+	clock_gettime(clock_REALTIME, &ts)
+	sec = int64(ts.tv_sec)
+	nsec = int32(ts.tv_nsec)
+	mono = nanotime()
+	return
 }
 
 //go:linkname syscall_Exit syscall.Exit
