@@ -65,7 +65,9 @@ func main() {
 	contract := NewContract(receiver, firstReceiver, action)
 	if contract == nil {
 		return
-	}`
+	}
+	data := chain.ReadActionData()
+`
 
 const cSingletonCode = `
 func (d *%[1]s) GetPrimary() uint64 {

@@ -763,7 +763,6 @@ func (t *CodeGenerator) genActionCode(notify bool) error {
 		t.writeCode("        case uint64(%d): //%s", StringToName(action.ActionName), action.ActionName)
 		if !action.Ignore {
 			t.writeCode("            t := %s{}", action.ActionName)
-			t.writeCode("            data := chain.ReadActionData()")
 			t.writeCode("            t.Unpack(data)")
 			args := "("
 			for i, member := range action.Members {
