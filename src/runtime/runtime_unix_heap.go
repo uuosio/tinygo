@@ -1,4 +1,4 @@
-// +build !eosio,
+// +build !eosio
 // +build darwin linux,!baremetal,!wasi freebsd,!baremetal
 // +build !nintendoswitch
 
