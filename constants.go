@@ -67,6 +67,11 @@ func main() {
 		return
 	}
 	data := chain.ReadActionData()
+	
+	//Fix data declared but not used error
+	if false {
+		println(data[0])
+	}
 `
 
 const cSingletonCode = `
