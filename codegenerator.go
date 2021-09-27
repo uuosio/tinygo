@@ -357,7 +357,7 @@ func (t *CodeGenerator) convertToAbiType(goType string) (string, error) {
 	}
 	msg := fmt.Sprintf("type %s can not be converted to an ABI type", goType)
 	if goType == "Asset" || goType == "Symbol" || goType == "Name" {
-		msg += "\nDo you mean chain." + goType
+		msg += fmt.Sprintf("\nDo you mean chain.%s?", goType)
 	}
 	return "", fmt.Errorf(msg)
 }
@@ -391,8 +391,11 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 	if ignore {
 		_, ok := field.Type.(*ast.StarExpr)
 		if !ok {
-			errMsg := fmt.Sprintf("ignore action parameter %v not a pointer type", field.Names)
-			return errors.New(errMsg)
+			_, ok = field.Type.(*ast.ArrayType)
+			if !ok {
+				errMsg := fmt.Sprintf("ignored action parameter %v not a pointer type", field.Names)
+				return errors.New(errMsg)
+			}
 		}
 	}
 
@@ -469,7 +472,7 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 	case *ast.StarExpr:
 		//Do not parse pointer type in struct
 		if isStructField {
-			log.Printf("+++++++Pointer %v in %s ignored\n", field.Names, structName)
+			log.Printf("+++++++Pointer type %v in %s ignored\n", field.Names, structName)
 			return nil
 		}
 
@@ -483,16 +486,17 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 				*memberList = append(*memberList, member)
 			}
 		case *ast.SelectorExpr:
-			ident, ok := v2.X.(*ast.Ident)
-			if !ok {
-				panic("Unhandled pointer type:" + fmt.Sprintf("%[1]v %[1]T", v2))
-			}
-			for _, name := range field.Names {
-				member := MemberType{}
-				member.Name = name.Name
-				member.Type = ident.Name + "." + v2.Sel.Name
-				member.LeadingType = TYPE_POINTER
-				*memberList = append(*memberList, member)
+			switch x := v2.X.(type) {
+			case *ast.Ident:
+				for _, name := range field.Names {
+					member := MemberType{}
+					member.Name = name.Name
+					member.Type = x.Name + "." + v2.Sel.Name
+					member.LeadingType = TYPE_POINTER
+					*memberList = append(*memberList, member)
+				}
+			default:
+				panic(fmt.Sprintf("Unknown pointer type: %T %v", x, x))
 			}
 		default:
 			panic("Unhandled pointer type:" + fmt.Sprintf("%[1]v %[1]T", v2))
@@ -780,14 +784,15 @@ func (t *CodeGenerator) genActionCode(notify bool) error {
 		} else {
 			args := "("
 			for i, member := range action.Members {
-				if member.LeadingType != TYPE_POINTER {
+				log.Println("+++++gen action code:", member.Name, member.Type)
+				if member.LeadingType == TYPE_POINTER || member.LeadingType == TYPE_SLICE {
 					//args += "&t." + member.Name
+					args += "nil"
+					if i != len(action.Members)-1 {
+						args += ", "
+					}
+				} else {
 					return fmt.Errorf("ignore action has not pointer parameter: %s", member.Name)
-				}
-
-				args += "nil"
-				if i != len(action.Members)-1 {
-					args += ", "
 				}
 			}
 			args += ")"
