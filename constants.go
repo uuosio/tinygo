@@ -95,6 +95,10 @@ func (t *%[1]sDB) Get() (*%[1]s) {
 	}
 	return data.(*%[1]s)
 }
+
+func (t *%[1]sDB) Remove() {
+	t.db.Remove()
+}
 `
 
 const cUnpackerCode = `
