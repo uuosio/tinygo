@@ -1362,7 +1362,7 @@ func (b *builder) createFunctionCall(instr *ssa.CallCommon) (llvm.Value, error) 
 		// applied) function call. If it is anonymous, it may be a closure.
 		name := fn.RelString(nil)
 		switch {
-		case name == "github.com/uuosio/chain.NewName":
+		case name == "github.com/uuosio/chain.NewName" || name == "github.com/uuosio/chain.N":
 			if len(instr.Args) != 1 {
 				break
 			}
