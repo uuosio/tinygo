@@ -120,3 +120,29 @@ import (
     "unsafe"
 )
 `
+
+const cExtensionTemplate = `
+func (t *%[1]s) Pack() []byte {
+	if !t.HasValue {
+		return []byte{}
+	}
+	return t.%[2]s.Pack()
+}
+
+func (t *%[1]s) Unpack(data []byte) int {
+	if len(data) == 0 {
+		t.HasValue = false
+		return 0
+	} else {
+		t.HasValue = true
+	}
+
+	dec := chain.NewDecoder(data)
+	dec.Unpack(&t.%[2]s)
+	return dec.Pos()
+}
+
+func (t *%[1]s) Size() int {
+	return t.%[2]s.Size()
+}
+`

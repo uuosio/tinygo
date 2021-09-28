@@ -259,6 +259,13 @@ type SecondaryIndexInfo struct {
 	Setter string
 }
 
+//handle binary_extension
+type BinaryExtension struct {
+	name string
+	//binary extension only has one member
+	member MemberType
+}
+
 type StructInfo struct {
 	PackageName      string
 	TableName        string
@@ -278,6 +285,7 @@ type CodeGenerator struct {
 	codeFile     *os.File
 	actions      []ActionInfo
 	structs      []StructInfo
+	extensions   []BinaryExtension
 	structMap    map[string]*StructInfo
 
 	hasMainFunc        bool
@@ -363,23 +371,38 @@ func (t *CodeGenerator) convertToAbiType(goType string) (string, error) {
 }
 
 func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
+	typ := goType.Type
+	binaryExtension := false
 	//special case for []byte type
-	if goType.Type == "byte" && goType.LeadingType == TYPE_SLICE {
+	if typ == "byte" && goType.LeadingType == TYPE_SLICE {
 		return "bytes", nil
 	}
 
-	abiType, err := t.convertToAbiType(goType.Type)
+	for i := range t.extensions {
+		if t.extensions[i].name == typ {
+			binaryExtension = true
+			typ = t.extensions[i].member.Type
+			break
+		}
+	}
+
+	abiType, err := t.convertToAbiType(typ)
 	if err != nil {
 		return "", err
 	}
 
 	if goType.LeadingType == TYPE_SLICE {
-		if abiType == "byte" {
-			return "bytes", nil
-		}
-		return abiType + "[]", nil
+		// if abiType == "byte" {
+		// 	return "bytes", nil
+		// }
+		abiType += "[]"
 	}
-	return abiType, nil
+
+	if binaryExtension {
+		return abiType + "$", nil
+	} else {
+		return abiType, nil
+	}
 }
 
 func (t *CodeGenerator) newError(p token.Pos, msg string) error {
@@ -508,6 +531,71 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 	return nil
 }
 
+func (t *CodeGenerator) parseBinaryExtension(packageName string, v *ast.GenDecl) error {
+	extension := BinaryExtension{}
+	if len(v.Specs) != 1 {
+		errMsg := fmt.Sprintf("Binary extension must have one spec")
+		return errors.New(errMsg)
+	}
+
+	spec, ok := v.Specs[0].(*ast.TypeSpec)
+	if !ok {
+		errMsg := fmt.Sprintf("Spec is not a TypeSpec")
+		return errors.New(errMsg)
+	}
+
+	_struct, ok := spec.Type.(*ast.StructType)
+	if !ok {
+		errMsg := fmt.Sprintf("type is not a struct type")
+		return errors.New(errMsg)
+	}
+
+	if _struct.Fields == nil || len(_struct.Fields.List) != 2 {
+		errMsg := fmt.Sprintf("Binary extension must have two fields")
+		return errors.New(errMsg)
+	}
+
+	extension.name = spec.Name.Name
+	field1 := _struct.Fields.List[0]
+	if len(field1.Names) != 0 {
+		return errors.New(fmt.Sprintf("binary extension should be extended from chain.BinaryExtension: %v", field1))
+	}
+
+	typ, ok := field1.Type.(*ast.SelectorExpr)
+	if !ok {
+		errMsg := fmt.Sprintf("Binary extension field1 is not an Ident")
+		return errors.New(errMsg)
+	}
+
+	ident := typ.X.(*ast.Ident)
+	if ident.Name+"."+typ.Sel.Name != "chain.BinaryExtension" {
+		return errors.New(fmt.Sprintf("binary extension should be extended from chain.BinaryExtension: %v", field1))
+	}
+
+	for _, field := range _struct.Fields.List {
+		log.Println("field:", field.Names)
+	}
+
+	field2 := _struct.Fields.List[1]
+	if len(field2.Names) != 1 {
+		return errors.New(fmt.Sprintf("wrong field: %v", field2.Names))
+	}
+
+	extension.member.Name = field2.Names[0].Name
+
+	switch typ := field2.Type.(type) {
+	case *ast.Ident:
+		extension.member.Type = typ.Name
+	case *ast.SelectorExpr:
+		ident := typ.X.(*ast.Ident)
+		extension.member.Type = ident.Name + "." + typ.Sel.Name
+	default:
+		panic("unknown filed type")
+	}
+	t.extensions = append(t.extensions, extension)
+	return nil
+}
+
 func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 	if v.Tok != token.TYPE {
 		return nil
@@ -519,7 +607,9 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 		n := len(v.Doc.List)
 		doc := v.Doc.List[n-1]
 		text := strings.TrimSpace(doc.Text)
-		if strings.HasPrefix(text, "//table") {
+		if text == "//binary_extension" {
+			return t.parseBinaryExtension(packageName, v)
+		} else if strings.HasPrefix(text, "//table") {
 			items := Split(text)
 			if len(items) == 2 && (items[0] == "//table") {
 				tableName := items[1]
@@ -1293,6 +1383,11 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 			index := &table.SecondaryIndexes[i]
 			t.writeCode(cGetDBTemplate, table.StructName, index.Name, i, indexTypeToSecondaryDBName(index.Type))
 		}
+	}
+
+	for i := range t.extensions {
+		ext := &t.extensions[i]
+		t.writeCode(cExtensionTemplate, ext.name, ext.member.Name)
 	}
 
 	t.writeCode(cDummyCode)

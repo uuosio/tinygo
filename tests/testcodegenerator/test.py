@@ -81,6 +81,28 @@ class Test(object):
     def teardown_method(self, method):
         pass
 
+    def test_ext(self):
+        with open('test-cpp.wasm', 'rb') as f:
+            code = f.read()
+        with open('test.abi', 'r') as f:
+            abi = f.read()
+        self.chain.deploy_contract('hello', code, abi, 0)
+        r = self.chain.push_action('hello', 'testext', {'a': 'hello', 'b':'aa'*32})
+        print_console(r)
+        r = self.chain.push_action('hello', 'testext2', {'a': 'goodbye'})
+        print_console(r)
+        self.chain.produce_block()
+
+        with open('test.wasm', 'rb') as f:
+            code = f.read()
+        with open('test.abi', 'r') as f:
+            abi = f.read()
+        self.chain.deploy_contract('hello', code, abi, 0)
+        r = self.chain.push_action('hello', 'testext', {'a': 'hello', 'b':'aa'*32})
+        print_console(r)
+        r = self.chain.push_action('hello', 'testext2', {'a': 'goodbye'})
+        print_console(r)
+
     def test_hello(self):
         with open('test.wasm', 'rb') as f:
             code = f.read()

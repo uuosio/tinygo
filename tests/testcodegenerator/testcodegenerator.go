@@ -77,6 +77,24 @@ func (c *MyContract) SayHellooo(name string) {
 func (c *MyContract) zzzzzzzzzzzzj() {
 }
 
+//binary_extension
+type MyExtension struct {
+	chain.BinaryExtension
+	value chain.Checksum256
+}
+
+//action testext
+func (c *MyContract) TestExtension(a string, b *MyExtension) {
+	chain.Check(b.HasValue, "a.HasValue")
+	chain.Println(b.value[:], a)
+}
+
+//action testext2
+func (c *MyContract) TestExtension2(a string, b *MyExtension) {
+	chain.Check(!b.HasValue, "a.HasValue")
+	chain.Println(a)
+}
+
 //action testpointer
 func (c *MyContract) testpointer(a *chain.Name) {
 	chain.Println("+++++your name:", *a)
