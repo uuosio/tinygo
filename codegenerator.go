@@ -49,18 +49,6 @@ import (
 	extended_asset
 */
 
-func Split(s string) []string {
-	aa := strings.Split(s, " ")
-	ret := []string{}
-	for i := range aa {
-		s := strings.TrimSpace(aa[i])
-		if s != "" {
-			ret = append(ret, s)
-		}
-	}
-	return ret
-}
-
 func char_to_symbol(c byte) byte {
 	if c >= 'a' && c <= 'z' {
 		return (c - 'a') + 6
@@ -610,27 +598,28 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 		if text == "//binary_extension" {
 			return t.parseBinaryExtension(packageName, v)
 		} else if strings.HasPrefix(text, "//table") {
-			items := Split(text)
-			if len(items) == 2 && (items[0] == "//table") {
-				tableName := items[1]
+			//items := Split(text)
+			parts := strings.Fields(text)
+			if len(parts) == 2 && (parts[0] == "//table") {
+				tableName := parts[1]
 				if !IsNameValid(tableName) {
 					return t.newError(doc.Pos(), "Invalid table name:"+tableName)
 				}
-				info.TableName = items[1]
-			} else if (len(items) == 3) && (items[0] == "//table") {
-				tableName := items[1]
+				info.TableName = parts[1]
+			} else if (len(parts) == 3) && (parts[0] == "//table") {
+				tableName := parts[1]
 				if !IsNameValid(tableName) {
 					return t.newError(doc.Pos(), "Invalid table name:"+tableName)
 				}
-				info.TableName = items[1]
-				if items[2] == "singleton" {
+				info.TableName = parts[1]
+				if parts[2] == "singleton" {
 					info.Singleton = true
 				}
 			}
 		} else if strings.HasPrefix(text, "//contract") {
-			items := Split(text)
-			if len(items) == 2 {
-				name := items[1]
+			parts := strings.Fields(text)
+			if len(parts) == 2 {
+				name := parts[1]
 				if t.contractName != "" {
 					errMsg := fmt.Sprintf("contract name %s replace by %s", t.contractName, name)
 					return t.newError(doc.Pos(), errMsg)
@@ -747,17 +736,18 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	doc := f.Doc.List[n-1]
 	text := strings.TrimSpace(doc.Text)
 
-	items := Split(text)
-	if len(items) < 2 || len(items) > 3 {
+	//	parts := Split(text)
+	parts := strings.Fields(text)
+	if len(parts) < 2 || len(parts) > 3 {
 		return nil
 	}
 
-	if items[0] == "//action" || items[0] == "//notify" {
+	if parts[0] == "//action" || parts[0] == "//notify" {
 	} else {
 		return nil
 	}
 
-	actionName := items[1]
+	actionName := parts[1]
 	if !IsNameValid(actionName) {
 		errMsg := fmt.Sprintf("Invalid action name: %s", actionName)
 		return t.newError(doc.Pos(), errMsg)
@@ -769,9 +759,9 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	}
 
 	ignore := false
-	if len(items) == 3 {
-		if items[2] != "ignore" {
-			errMsg := fmt.Sprintf("Bad action, %s not recognized as a valid paramater", items[2])
+	if len(parts) == 3 {
+		if parts[2] != "ignore" {
+			errMsg := fmt.Sprintf("Bad action, %s not recognized as a valid paramater", parts[2])
 			return errors.New(errMsg)
 		}
 		ignore = true
@@ -784,7 +774,7 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	action.FuncName = f.Name.Name
 	action.Ignore = ignore
 
-	if items[0] == "//notify" {
+	if parts[0] == "//notify" {
 		action.IsNotify = true
 	} else {
 		action.IsNotify = false
