@@ -146,3 +146,68 @@ func (t *%[1]s) Size() int {
 	return t.%[2]s.Size()
 }
 `
+
+const cContractTemplate = `
+package main
+
+import (
+	"github.com/uuosio/chain"
+)
+
+//contract %[1]s
+type Contract struct {
+	self, firstReceiver, action chain.Name
+}
+
+func NewContract(receiver, firstReceiver, action chain.Name) *Contract {
+	return &Contract{}
+}
+
+//action sayhello
+func (c *Contract) SayHello(name string) {
+	chain.Println("Hello, ", name)
+}
+`
+
+const cUtils = `
+package main
+
+import (
+	"github.com/uuosio/chain"
+)
+
+func check(b bool, msg string) {
+	chain.Check(b, msg)
+}
+`
+
+const cTables = `
+package main
+
+import (
+	"github.com/uuosio/chain"
+)
+
+//table mytable
+type MyData struct {
+	primary uint64 		//primary : t.primary
+	a1 uint64         	//IDX64 		: Bya1 : t.a1 : t.a1
+	a2 chain.Uint128  	//IDX128 		: Bya2 : t.a2 : t.a2
+	a3 chain.Uint256  	//IDX256 		: Bya3 : t.a3 : t.a3
+	a4 float64        	//IDXFloat64 	: Bya4 : t.a4 : t.a4
+	a5 chain.Float128 	//IDXFloat128 	: Bya5 : t.a5 : t.a5
+}
+`
+
+const cStructs = `
+package main
+
+type MyStruct struct {
+	a uint64
+	b uint64
+}
+`
+
+const cBuild = `
+eosio-go build -o %[1]s.wasm .
+`

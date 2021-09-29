@@ -1017,6 +1017,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  env:   list environment variables used during build")
 	fmt.Fprintln(os.Stderr, "  list:  run go list using the TinyGo root")
 	fmt.Fprintln(os.Stderr, "  clean: empty cache directory ("+goenv.Get("GOCACHE")+")")
+	fmt.Fprintln(os.Stderr, "  gencode: generate contract code and abi")
+	fmt.Fprintln(os.Stderr, "  init [contract name]: initialize contract project")
 	fmt.Fprintln(os.Stderr, "  help:  print this help text")
 	fmt.Fprintln(os.Stderr, "\nflags:")
 	flag.PrintDefaults()
@@ -1158,6 +1160,15 @@ func parseGoLinkFlag(flagsString string) (map[string]map[string]string, error) {
 		return nil, err
 	}
 	return map[string]map[string]string(globalVarValues), nil
+}
+
+func genFile(fileName string, mod os.FileMode, format string, args ...interface{}) {
+	if _, err := os.Stat(fileName); err == nil {
+		fmt.Fprintf(os.Stderr, "%s already exists.\n", fileName)
+		os.Exit(1)
+	}
+	content := fmt.Sprintf(format, args...)
+	ioutil.WriteFile(fileName, []byte(content), mod)
 }
 
 func main() {
@@ -1313,6 +1324,22 @@ func main() {
 		}
 		err := Build(pkgName, outpath, options)
 		handleCompilerError(err)
+	case "init":
+		if flag.NArg() != 1 {
+			usage()
+			os.Exit(1)
+		}
+		contractName := flag.Arg(0)
+		if !IsNameValid(contractName) {
+			fmt.Fprintln(os.Stderr, "Invalid contract name:", contractName)
+			os.Exit(1)
+		}
+		contractFile := contractName + ".go"
+		genFile(contractFile, 0644, cContractTemplate, contractName)
+		genFile("utils.go", 0644, cUtils)
+		genFile("tables.go", 0644, cTables)
+		genFile("structs.go", 0644, cStructs)
+		genFile("build.sh", 0777, cBuild, contractName)
 	case "gencode":
 		pkgName := "."
 		if flag.NArg() == 1 {
