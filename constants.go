@@ -147,6 +147,38 @@ func (t *%[1]s) Size() int {
 }
 `
 
+const cOptionalTemplate = `
+func (t *%[1]s) Pack() []byte {
+	if !t.IsValid {
+		return []byte{0}
+	}
+	buf := make([]byte, 0, t.Size()+1)
+	buf = append(buf, 1)
+	buf = append(buf, t.%[2]s.Pack()...) //TODO: handle pack for different type
+	return buf
+}
+
+func (t *%[1]s) Unpack(data []byte) int {
+	chain.Check(len(data) >= 1, "invalid data size")
+	valid := data[1]
+	if valid == 0 {
+		t.IsValid = false
+	} else if valid == 1 {
+		t.IsValid = true
+	} else {
+		chain.Check(false, "invalid optional value")
+	}
+
+	dec := chain.NewDecoder(data[1:])
+	dec.Unpack(&t.%[2]s) //TODO: handle unpack for different type
+	return dec.Pos() + 1
+}
+
+func (t *%[1]s) Size() int {
+	return t.%[2]s.Size() + 1 //TODO: calculate size for different type
+}
+`
+
 const cContractTemplate = `
 package main
 

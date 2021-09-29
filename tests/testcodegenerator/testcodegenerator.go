@@ -95,6 +95,24 @@ func (c *MyContract) TestExtension2(a string, b *MyExtension) {
 	chain.Println(a)
 }
 
+//optional
+type MyOptional struct {
+	chain.Optional
+	value chain.Checksum256
+}
+
+//action testopt
+func (c *MyContract) TestOptional(a string, b *MyOptional) {
+	chain.Check(!b.IsValid, "a.IsValid")
+	chain.Println(a)
+}
+
+//action testopt2
+func (c *MyContract) TestOptional2(a string, b *MyOptional) {
+	chain.Check(b.IsValid, "a.IsValid")
+	chain.Println(a)
+}
+
 //action testpointer
 func (c *MyContract) testpointer(a *chain.Name) {
 	chain.Println("+++++your name:", *a)
@@ -211,8 +229,8 @@ type MyTx struct {
 }
 
 //action testignore ignore
-// func (c *MyContract) testignore(
-// 	a1 *Transaction,
-// ) {
+func (c *MyContract) testignore(
+	a1 *Transaction,
+) {
 
-// }
+}

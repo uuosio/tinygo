@@ -247,10 +247,16 @@ type SecondaryIndexInfo struct {
 	Setter string
 }
 
-//handle binary_extension
-type BinaryExtension struct {
-	name string
-	//binary extension only has one member
+const (
+	NormalType = iota
+	BinaryExtensionType
+	OptionalType
+)
+
+//handle binary_extension and optional abi types
+type SpecialAbiType struct {
+	typ    int
+	name   string
 	member MemberType
 }
 
@@ -266,15 +272,15 @@ type StructInfo struct {
 }
 
 type CodeGenerator struct {
-	dirName      string
-	currentFile  string
-	contractName string
-	fset         *token.FileSet
-	codeFile     *os.File
-	actions      []ActionInfo
-	structs      []StructInfo
-	extensions   []BinaryExtension
-	structMap    map[string]*StructInfo
+	dirName         string
+	currentFile     string
+	contractName    string
+	fset            *token.FileSet
+	codeFile        *os.File
+	actions         []ActionInfo
+	structs         []StructInfo
+	specialAbiTypes []SpecialAbiType
+	structMap       map[string]*StructInfo
 
 	hasMainFunc        bool
 	abiStructsMap      map[string]*StructInfo
@@ -360,16 +366,16 @@ func (t *CodeGenerator) convertToAbiType(goType string) (string, error) {
 
 func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
 	typ := goType.Type
-	binaryExtension := false
+	var specialAbiType *SpecialAbiType
 	//special case for []byte type
 	if typ == "byte" && goType.LeadingType == TYPE_SLICE {
 		return "bytes", nil
 	}
 
-	for i := range t.extensions {
-		if t.extensions[i].name == typ {
-			binaryExtension = true
-			typ = t.extensions[i].member.Type
+	for i := range t.specialAbiTypes {
+		if t.specialAbiTypes[i].name == typ {
+			specialAbiType = &t.specialAbiTypes[i]
+			typ = specialAbiType.member.Type
 			break
 		}
 	}
@@ -386,8 +392,14 @@ func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
 		abiType += "[]"
 	}
 
-	if binaryExtension {
-		return abiType + "$", nil
+	if specialAbiType != nil {
+		if specialAbiType.typ == BinaryExtensionType {
+			return abiType + "$", nil
+		} else if specialAbiType.typ == OptionalType {
+			return abiType + "?", nil
+		} else {
+			return "", fmt.Errorf("unknown special abi type %d", specialAbiType.typ)
+		}
 	} else {
 		return abiType, nil
 	}
@@ -519,45 +531,57 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 	return nil
 }
 
-func (t *CodeGenerator) parseBinaryExtension(packageName string, v *ast.GenDecl) error {
-	extension := BinaryExtension{}
+func (t *CodeGenerator) parseSpecialAbiType(specialType int, packageName string, v *ast.GenDecl) bool {
+	extension := SpecialAbiType{}
 	if len(v.Specs) != 1 {
-		errMsg := fmt.Sprintf("Binary extension must have one spec")
-		return errors.New(errMsg)
+		return false
 	}
 
 	spec, ok := v.Specs[0].(*ast.TypeSpec)
 	if !ok {
-		errMsg := fmt.Sprintf("Spec is not a TypeSpec")
-		return errors.New(errMsg)
+		return false
 	}
 
 	_struct, ok := spec.Type.(*ast.StructType)
 	if !ok {
-		errMsg := fmt.Sprintf("type is not a struct type")
-		return errors.New(errMsg)
+		return false
 	}
 
 	if _struct.Fields == nil || len(_struct.Fields.List) != 2 {
-		errMsg := fmt.Sprintf("Binary extension must have two fields")
-		return errors.New(errMsg)
+		return false
 	}
 
 	extension.name = spec.Name.Name
 	field1 := _struct.Fields.List[0]
 	if len(field1.Names) != 0 {
-		return errors.New(fmt.Sprintf("binary extension should be extended from chain.BinaryExtension: %v", field1))
+		return false
 	}
 
 	typ, ok := field1.Type.(*ast.SelectorExpr)
 	if !ok {
-		errMsg := fmt.Sprintf("Binary extension field1 is not an Ident")
-		return errors.New(errMsg)
+		return false
 	}
 
 	ident := typ.X.(*ast.Ident)
-	if ident.Name+"."+typ.Sel.Name != "chain.BinaryExtension" {
-		return errors.New(fmt.Sprintf("binary extension should be extended from chain.BinaryExtension: %v", field1))
+	if ident.Name+"."+typ.Sel.Name == "chain.BinaryExtension" {
+		extension.typ = BinaryExtensionType
+		if specialType != BinaryExtensionType {
+			log.Printf("warning: struct %s declare itself as a binary extension abi type, but not embeded chain.BinaryExtension", extension.name)
+			return false
+		}
+	} else if ident.Name+"."+typ.Sel.Name == "chain.Optional" {
+		extension.typ = OptionalType
+		if specialType != OptionalType {
+			log.Printf("warning: struct %s declare itself as a optional abi type, but not embeded chain.BinaryExtension", extension.name)
+			return false
+		}
+	} else {
+		if specialType == BinaryExtensionType {
+			log.Printf("warning: struct %s should embeded chain.BinaryExtension struct", extension.name)
+		} else if specialType == OptionalType {
+			log.Printf("warning: struct %s should embeded chain.Optional struct", extension.name)
+		}
+		return false
 	}
 
 	for _, field := range _struct.Fields.List {
@@ -566,7 +590,7 @@ func (t *CodeGenerator) parseBinaryExtension(packageName string, v *ast.GenDecl)
 
 	field2 := _struct.Fields.List[1]
 	if len(field2.Names) != 1 {
-		return errors.New(fmt.Sprintf("wrong field: %v", field2.Names))
+		return false
 	}
 
 	extension.member.Name = field2.Names[0].Name
@@ -580,8 +604,8 @@ func (t *CodeGenerator) parseBinaryExtension(packageName string, v *ast.GenDecl)
 	default:
 		panic("unknown filed type")
 	}
-	t.extensions = append(t.extensions, extension)
-	return nil
+	t.specialAbiTypes = append(t.specialAbiTypes, extension)
+	return true
 }
 
 func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
@@ -596,7 +620,11 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 		doc := v.Doc.List[n-1]
 		text := strings.TrimSpace(doc.Text)
 		if text == "//binary_extension" {
-			return t.parseBinaryExtension(packageName, v)
+			t.parseSpecialAbiType(BinaryExtensionType, packageName, v)
+			return nil
+		} else if text == "//optional" {
+			t.parseSpecialAbiType(OptionalType, packageName, v)
+			return nil
 		} else if strings.HasPrefix(text, "//table") {
 			//items := Split(text)
 			parts := strings.Fields(text)
@@ -1020,6 +1048,9 @@ func (t *CodeGenerator) unpackBaseType(varName string, typ string) {
 		t.unpackType("UnpackFloat64", varName)
 	case "[]byte":
 		t.unpackType("UnpackBytes", varName)
+	//TODO: handle other types that does not have Unpacker interface
+	case "int":
+		panic("int type is not supported")
 	default:
 		t.unpackI(varName)
 	}
@@ -1091,6 +1122,97 @@ func (t *CodeGenerator) genUnpackCode(structName string, members []MemberType) {
 		t.unpackMember(member)
 	}
 	t.writeCode("    return dec.Pos()\n}\n")
+}
+
+func (t *CodeGenerator) genPackCodeForSpecialStruct(specialType int, structName string, member MemberType) {
+	if specialType == BinaryExtensionType {
+		t.writeCode(`
+func (t *%s) Pack() []byte {
+	if !t.HasValue {
+		return []byte{}
+	}`, structName)
+		t.writeCode("    enc := chain.NewEncoder(t.Size())")
+		t.packType(member)
+		t.writeCode("    return enc.GetBytes()\n}\n")
+	} else if specialType == OptionalType {
+		t.writeCode(`
+func (t *%s) Pack() []byte {
+	if !t.IsValid {
+		return []byte{0}
+	}`, structName)
+		t.writeCode("    enc := chain.NewEncoder(t.Size())")
+		t.writeCode("    enc.WriteUint8(uint8(1))")
+		t.packType(member)
+		t.writeCode("    return enc.GetBytes()\n}\n")
+	}
+}
+
+func (t *CodeGenerator) genUnpackCodeForSpecialStruct(specialType int, structName string, member MemberType) {
+	if specialType == BinaryExtensionType {
+		t.writeCode(`
+func (t *%s) Unpack(data []byte) int {
+	if len(data) == 0 {
+		t.HasValue = false
+		return 0
+	} else {
+		t.HasValue = true
+	}`, structName)
+		t.writeCode("    dec := chain.NewDecoder(data)")
+		t.unpackMember(member)
+		t.writeCode("    return dec.Pos()\n}\n")
+	} else if specialType == OptionalType {
+		t.writeCode(`
+func (t *%s) Unpack(data []byte) int {
+	chain.Check(len(data) >= 1, "invalid data size")
+    dec := chain.NewDecoder(data)
+	valid := dec.ReadUint8()
+	if valid == 0 {
+		t.IsValid = false
+		return 1
+	} else if valid == 1 {
+		t.IsValid = true
+	} else {
+		chain.Check(false, "invalid optional value")
+	}`, structName)
+		t.unpackMember(member)
+		t.writeCode("    return dec.Pos()\n}\n")
+	}
+}
+
+func (t *CodeGenerator) genSizeCodeForSpecialStruct(specialType int, structName string, member MemberType) {
+	if specialType == BinaryExtensionType {
+		t.writeCode("func (t *%s) Size() int {", structName)
+		t.writeCode("    size := 0")
+		t.writeCode("    if !t.HasValue {")
+		t.writeCode("        return size")
+		t.writeCode("    }")
+		if member.LeadingType == TYPE_SLICE {
+			t.writeCode("    size += chain.PackedVarUint32Length(uint32(len(t.%s)))", member.Name)
+			t.calcArrayMemberSize(member.Name, member.Type)
+		} else if member.LeadingType == TYPE_ARRAY {
+			t.writeCode("    for i := range t.%s {", member.Name)
+			t.calcNotArrayMemberSize(member.Name+"[i]", member.Type)
+			t.writeCode("    }")
+		} else {
+			t.calcNotArrayMemberSize(member.Name, member.Type)
+		}
+		t.writeCode("    return size")
+		t.writeCode("}")
+	} else if specialType == OptionalType {
+		t.writeCode("func (t *%s) Size() int {", structName)
+		t.writeCode("    size := 1")
+		t.writeCode("    if !t.IsValid {")
+		t.writeCode("        return size")
+		t.writeCode("    }")
+		if member.LeadingType == TYPE_SLICE {
+			t.writeCode("    size += chain.PackedVarUint32Length(uint32(len(t.%s)))", member.Name)
+			t.calcArrayMemberSize(member.Name, member.Type)
+		} else {
+			t.calcNotArrayMemberSize(member.Name, member.Type)
+		}
+		t.writeCode("    return size")
+		t.writeCode("}")
+	}
 }
 
 func (t *CodeGenerator) calcNotArrayMemberSize(name string, goType string) {
@@ -1375,9 +1497,11 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 		}
 	}
 
-	for i := range t.extensions {
-		ext := &t.extensions[i]
-		t.writeCode(cExtensionTemplate, ext.name, ext.member.Name)
+	for i := range t.specialAbiTypes {
+		ext := &t.specialAbiTypes[i]
+		t.genPackCodeForSpecialStruct(ext.typ, ext.name, ext.member)
+		t.genUnpackCodeForSpecialStruct(ext.typ, ext.name, ext.member)
+		t.genSizeCodeForSpecialStruct(ext.typ, ext.name, ext.member)
 	}
 
 	t.writeCode(cDummyCode)
