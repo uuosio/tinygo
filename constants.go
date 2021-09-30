@@ -199,6 +199,79 @@ func NewContract(receiver, firstReceiver, action chain.Name) *Contract {
 func (c *Contract) SayHello(name string) {
 	chain.Println("Hello, ", name)
 }
+
+type MyOptional struct {
+	chain.Optional
+	value string
+}
+
+//example of optional abi type
+//action testoptional
+func (c *Contract) testoptional(opt *MyOptional) {
+	if opt.IsValid {
+		chain.Println(opt.value)
+	}
+}
+
+type MyExtension struct {
+	chain.BinaryExtension
+	value string
+}
+
+//example of binary_extension abi type
+//action testext
+func (c *Contract) testext(ext *MyExtension) {
+	if ext.HasValue {
+		chain.Println(ext.value)
+	}
+}
+`
+
+const cContractCode = `
+package main
+import (
+	"github.com/uuosio/chain"
+)
+
+//contract %[1]s
+type Contract struct {
+	self, firstReceiver, action chain.Name
+}
+
+func NewContract(receiver, firstReceiver, action chain.Name) *Contract {
+	return &Contract{}
+}
+
+//action sayhello
+func (c *Contract) SayHello(name string) {
+	chain.Println("Hello, ", name)
+}
+
+type MyOptional struct {
+	chain.Optional
+	value string
+}
+
+//example of optional abi type
+//action testoptional
+func (c *Contract) testoptional(opt *MyOptional) {
+	if opt.IsValid {
+		chain.Println(value)
+	}
+}
+
+type MyExtension struct {
+	chain.BinaryExtension
+	value string
+}
+
+//example of binary_extension abi type
+//action testoptional
+func (c *Contract) testoptional(ext *MyExtension) {
+	if ext.HasValue {
+		chain.Println(ext.value)
+	}
+}
 `
 
 const cUtils = `
