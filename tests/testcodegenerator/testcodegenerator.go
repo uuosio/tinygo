@@ -79,44 +79,54 @@ func (c *MyContract) SayHellooo(name string) {
 func (c *MyContract) zzzzzzzzzzzzj() {
 }
 
-//binary_extension
 type MyExtension struct {
 	chain.BinaryExtension
 	value chain.Checksum256
 }
 
 //action testext
-func (c *MyContract) TestExtension(a string, b *MyExtension) {
-	chain.Check(b.HasValue, "a.HasValue!")
-	chain.Println(b, a)
+func (t *MyContract) TestExtension(a string, b *MyExtension, c *MyExtension) {
+	chain.Check(b.HasValue, "b.HasValue!")
+	chain.Check(c.HasValue, "c.HasValue!")
+	chain.Println(a, b.value[:], c.value[:])
 }
 
 //action testext2
-func (c *MyContract) TestExtension2(a string, b *MyExtension) {
-	chain.Check(!b.HasValue, "a.HasValue")
-	chain.Println(a)
+func (t *MyContract) TestExtension2(a string, b *MyExtension, c *MyExtension) {
+	chain.Check(!b.HasValue, "!b.HasValue")
+	chain.Check(!c.HasValue, "!c.HasValue")
+	chain.Println(a, b.HasValue, c.HasValue)
 }
 
-//optional
 type MyOptional struct {
 	chain.Optional
 	value chain.Checksum256
 }
 
 //action testopt
-func (c *MyContract) TestOptional(a string, b *MyOptional) {
-	chain.Check(!b.IsValid, "a.IsValid")
+func (t *MyContract) TestOptional(a string, b *MyOptional, c *MyOptional) {
+	chain.Check(b.IsValid, "b.IsValid")
+	chain.Check(c.IsValid, "c.IsValid")
 	chain.Println(a)
+	chain.Println(b.value[:], c.value[:])
 }
 
 //action testopt2
-func (c *MyContract) TestOptional2(a string, b *MyOptional) {
-	chain.Check(b.IsValid, "a.IsValid")
-	chain.Println(a)
+func (t *MyContract) TestOptional2(a string, b *MyOptional, c *MyOptional) {
+	chain.Check(!b.IsValid, "!b.IsValid")
+	chain.Check(!c.IsValid, "!c.IsValid")
+	chain.Println(a, b.IsValid, c.IsValid)
+}
+
+//action testcombine
+func (t *MyContract) TestCombine(a string, b *MyOptional, c *MyExtension) {
+	chain.Check(b.IsValid, "b.IsValid")
+	chain.Check(c.HasValue, "c.HasValue")
+	chain.Println(a, b.IsValid, c.HasValue)
 }
 
 //action testpointer
-func (c *MyContract) testpointer(a *chain.Name) {
+func (t *MyContract) testpointer(a *chain.Name) {
 	chain.Println("+++++your name:", *a)
 }
 

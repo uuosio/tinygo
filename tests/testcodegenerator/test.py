@@ -82,26 +82,30 @@ class Test(object):
         pass
 
     def test_ext(self):
-        with open('test-cpp.wasm', 'rb') as f:
-            code = f.read()
-        with open('test.abi', 'r') as f:
-            abi = f.read()
-        self.chain.deploy_contract('hello', code, abi, 0)
-        r = self.chain.push_action('hello', 'testext', {'a': 'hello', 'b':'aa'*32})
-        print_console(r)
-        r = self.chain.push_action('hello', 'testext2', {'a': 'goodbye'})
-        print_console(r)
-        self.chain.produce_block()
+        for wasm_file in ['test-cpp.wasm', 'test.wasm']:
+            with open(wasm_file, 'rb') as f:
+                code = f.read()
+            with open('test.abi', 'r') as f:
+                abi = f.read()
+            self.chain.deploy_contract('hello', code, abi, 0)
+            r = self.chain.push_action('hello', 'testext', {'a': 'hello', 'b':'aa'*32, 'c':'bb'*32})
+            print_console(r)
+            r = self.chain.push_action('hello', 'testext2', {'a': 'goodbye'})
+            print_console(r)
+            self.chain.produce_block()
 
-        with open('test.wasm', 'rb') as f:
-            code = f.read()
-        with open('test.abi', 'r') as f:
-            abi = f.read()
-        self.chain.deploy_contract('hello', code, abi, 0)
-        r = self.chain.push_action('hello', 'testext', {'a': 'hello', 'b':'aa'*32})
-        print_console(r)
-        r = self.chain.push_action('hello', 'testext2', {'a': 'goodbye'})
-        print_console(r)
+            r = self.chain.push_action('hello', 'testopt', {'a': 'hello', 'b':'aa'*32, 'c':'bb'*32})
+            print_console(r)
+            # r = self.chain.pack_args('hello', 'testopt2', {'a': 'goodbye', 'b': None, 'c': None})
+            # logger.info(r)
+            r = self.chain.push_action('hello', 'testopt2', {'a': 'goodbye', 'b': None, 'c': None})
+            print_console(r)
+            self.chain.produce_block()
+
+            r = self.chain.push_action('hello', 'testcombine', {'a': 'goodbye', 'b': 'aa'*32, 'c': 'cc'*32})
+            print_console(r)
+            self.chain.produce_block()
+            self.chain.produce_block()
 
     def test_hello(self):
         with open('test.wasm', 'rb') as f:

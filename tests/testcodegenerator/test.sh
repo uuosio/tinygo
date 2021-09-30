@@ -1,10 +1,11 @@
 eosio-cpp -o test-cpp.wasm cpp/test.cpp
-eosio-wasm2wast test.wasm -o test.wast
-
 if [ $? -ne 0 ]; then
     echo "build cpp failed"
     exit $?
 fi
+
+eosio-wasm2wast test.wasm -o test.wast
+
 
 eosio-go build -o test.wasm .
 if [ $? -ne 0 ]; then
