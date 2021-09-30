@@ -875,6 +875,10 @@ func (t *CodeGenerator) ParseGoFile(goFile string) error {
 func (t *CodeGenerator) writeCode(format string, a ...interface{}) {
 	fmt.Fprintf(t.codeFile, "\n")
 	fmt.Fprintf(t.codeFile, format, a...)
+
+	if format == "}" { //end of function
+		fmt.Fprintf(t.codeFile, "\n")
+	}
 }
 
 func (t *CodeGenerator) genActionCode(notify bool) error {
@@ -1016,10 +1020,7 @@ func (t *CodeGenerator) packType(member StructMember) {
 }
 
 func (t *CodeGenerator) unpackType(funcName string, varName string) {
-	t.writeCode("{")
-	t.writeCode("    v := dec.%s()", funcName)
-	t.writeCode("    %s = v", varName)
-	t.writeCode("}")
+	t.writeCode("    %s = dec.%s()", varName, funcName)
 }
 
 func (t *CodeGenerator) unpackI(varName string) {
@@ -1115,7 +1116,7 @@ func (t *CodeGenerator) genStruct(structName string, members []StructMember) {
 			t.writeCode("    %s %s", member.Name, member.Type)
 		}
 	}
-	t.writeCode("}\n")
+	t.writeCode("}")
 }
 
 func (t *CodeGenerator) genPackCode(structName string, members []StructMember) {
@@ -1739,6 +1740,9 @@ func (t *CodeGenerator) Analyse() {
 }
 
 func GenerateCode(inFile string) error {
+	// log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
+
 	gen := NewCodeGenerator()
 	gen.fset = token.NewFileSet()
 
