@@ -1,6 +1,8 @@
 package main
 
 import (
+	"math"
+
 	"github.com/uuosio/chain"
 	"github.com/uuosio/chain/logger"
 )
@@ -85,8 +87,8 @@ type MyExtension struct {
 
 //action testext
 func (c *MyContract) TestExtension(a string, b *MyExtension) {
-	chain.Check(b.HasValue, "a.HasValue")
-	chain.Println(b.value[:], a)
+	chain.Check(b.HasValue, "a.HasValue!")
+	chain.Println(b, a)
 }
 
 //action testext2
@@ -233,4 +235,9 @@ func (c *MyContract) testignore(
 	a1 *Transaction,
 ) {
 
+}
+
+//action testmath
+func (c *MyContract) testmath() {
+	chain.Println("++++math.max", math.Max(2.0, 3.0))
 }

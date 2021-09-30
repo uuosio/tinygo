@@ -12,7 +12,11 @@ package compiler
 // This results in slower than possible implementations, but at least they are
 // usable.
 
-import "tinygo.org/x/go-llvm"
+import (
+	"strings"
+
+	"tinygo.org/x/go-llvm"
+)
 
 var stdlibAliases = map[string]string{
 	// crypto packages
@@ -23,58 +27,72 @@ var stdlibAliases = map[string]string{
 	"crypto/sha512.blockAMD64": "crypto/sha512.blockGeneric",
 
 	// math package
-	// "math.Asin":      "math.asin",
-	// "math.Asinh":     "math.asinh",
-	// "math.Acos":      "math.acos",
-	// "math.Acosh":     "math.acosh",
-	// "math.Atan":      "math.atan",
-	// "math.Atanh":     "math.atanh",
-	// "math.Atan2":     "math.atan2",
-	// "math.Cbrt":      "math.cbrt",
-	// "math.Ceil":      "math.ceil",
-	// "math.archCeil":  "math.ceil",
-	// "math.Cos":       "math.cos",
-	// "math.Cosh":      "math.cosh",
-	// "math.Erf":       "math.erf",
-	// "math.Erfc":      "math.erfc",
-	// "math.Exp":       "math.exp",
-	// "math.archExp":   "math.exp",
-	// "math.Expm1":     "math.expm1",
-	// "math.Exp2":      "math.exp2",
-	// "math.archExp2":  "math.exp2",
-	// "math.Floor":     "math.floor",
-	// "math.archFloor": "math.floor",
-	// "math.Frexp":     "math.frexp",
-	// "math.Hypot":     "math.hypot",
-	// "math.archHypot": "math.hypot",
-	// "math.Ldexp":     "math.ldexp",
-	// "math.Log":       "math.log",
-	// "math.archLog":   "math.log",
-	// "math.Log1p":     "math.log1p",
-	// "math.Log10":     "math.log10",
-	// "math.Log2":      "math.log2",
-	// "math.Max":       "math.max",
-	// "math.archMax":   "math.max",
-	// "math.Min":       "math.min",
-	// "math.archMin":   "math.min",
-	// "math.Mod":       "math.mod",
-	// "math.Modf":      "math.modf",
-	// "math.archModf":  "math.modf",
-	// "math.Pow":       "math.pow",
-	// "math.Remainder": "math.remainder",
-	// "math.Sin":       "math.sin",
-	// "math.Sinh":      "math.sinh",
-	// "math.Sqrt":      "math.sqrt",
-	// "math.archSqrt":  "math.sqrt",
-	// "math.Tan":       "math.tan",
-	// "math.Tanh":      "math.tanh",
-	// "math.Trunc":     "math.trunc",
-	// "math.archTrunc": "math.trunc",
+	"math.Asin":      "math.asin",
+	"math.Asinh":     "math.asinh",
+	"math.Acos":      "math.acos",
+	"math.Acosh":     "math.acosh",
+	"math.Atan":      "math.atan",
+	"math.Atanh":     "math.atanh",
+	"math.Atan2":     "math.atan2",
+	"math.Cbrt":      "math.cbrt",
+	"math.Ceil":      "math.ceil",
+	"math.archCeil":  "math.ceil",
+	"math.Cos":       "math.cos",
+	"math.Cosh":      "math.cosh",
+	"math.Erf":       "math.erf",
+	"math.Erfc":      "math.erfc",
+	"math.Exp":       "math.exp",
+	"math.archExp":   "math.exp",
+	"math.Expm1":     "math.expm1",
+	"math.Exp2":      "math.exp2",
+	"math.archExp2":  "math.exp2",
+	"math.Floor":     "math.floor",
+	"math.archFloor": "math.floor",
+	"math.Frexp":     "math.frexp",
+	"math.Hypot":     "math.hypot",
+	"math.archHypot": "math.hypot",
+	"math.Ldexp":     "math.ldexp",
+	"math.Log":       "math.log",
+	"math.archLog":   "math.log",
+	"math.Log1p":     "math.log1p",
+	"math.Log10":     "math.log10",
+	"math.Log2":      "math.log2",
+	"math.Max":       "math.max",
+	"math.archMax":   "math.max",
+	"math.Min":       "math.min",
+	"math.archMin":   "math.min",
+	"math.Mod":       "math.mod",
+	"math.Modf":      "math.modf",
+	"math.archModf":  "math.modf",
+	"math.Pow":       "math.pow",
+	"math.Remainder": "math.remainder",
+	"math.Sin":       "math.sin",
+	"math.Sinh":      "math.sinh",
+	"math.Sqrt":      "math.sqrt",
+	"math.archSqrt":  "math.sqrt",
+	"math.Tan":       "math.tan",
+	"math.Tanh":      "math.tanh",
+	"math.Trunc":     "math.trunc",
+	"math.archTrunc": "math.trunc",
 }
 
 // createAlias implements the function (in the builder) as a call to the alias
 // function.
 func (b *builder) createAlias(alias llvm.Value) {
+	if !b.info.exported {
+		b.llvmFn.SetVisibility(llvm.HiddenVisibility)
+		b.llvmFn.SetUnnamedAddr(true)
+	}
+	if b.info.section != "" {
+		b.llvmFn.SetSection(b.info.section)
+	}
+	if b.info.exported && strings.HasPrefix(b.Triple, "wasm") {
+		// Set the exported name. This is necessary for WebAssembly because
+		// otherwise the function is not exported.
+		functionAttr := b.ctx.CreateStringAttribute("wasm-export-name", b.info.linkName)
+		b.llvmFn.AddFunctionAttr(functionAttr)
+	}
+
 	if b.Debug {
 		if b.fn.Syntax() != nil {
 			// Create debug info file if present.

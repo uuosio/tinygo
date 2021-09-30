@@ -2,7 +2,7 @@ package runtime
 
 // This file redirects math stubs to their fallback implementation.
 // TODO: use optimized versions if possible.
-
+/*
 import (
 	_ "unsafe"
 )
@@ -270,3 +270,4 @@ func llvm_trunc(x float64) float64
 
 //go:linkname math_trunc math.trunc
 func math_trunc(x float64) float64
+*/

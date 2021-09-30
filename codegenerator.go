@@ -225,17 +225,18 @@ const (
 	TYPE_POINTER
 )
 
-type MemberType struct {
+type StructMember struct {
 	Name        string
 	Type        string
 	LeadingType int
+	Pos         token.Pos
 }
 
 type ActionInfo struct {
 	ActionName string
 	FuncName   string
 	StructName string
-	Members    []MemberType
+	Members    []StructMember
 	IsNotify   bool
 	Ignore     bool
 }
@@ -257,7 +258,7 @@ const (
 type SpecialAbiType struct {
 	typ    int
 	name   string
-	member MemberType
+	member StructMember
 }
 
 type StructInfo struct {
@@ -268,7 +269,7 @@ type StructInfo struct {
 	Comment          string
 	PrimaryKey       string
 	SecondaryIndexes []SecondaryIndexInfo
-	Members          []MemberType
+	Members          []StructMember
 }
 
 type CodeGenerator struct {
@@ -347,7 +348,7 @@ func NewCodeGenerator() *CodeGenerator {
 	return t
 }
 
-func (t *CodeGenerator) convertToAbiType(goType string) (string, error) {
+func (t *CodeGenerator) convertToAbiType(pos token.Pos, goType string) (string, error) {
 	abiType, ok := _convertToAbiType(goType)
 	if ok {
 		return abiType, nil
@@ -361,10 +362,11 @@ func (t *CodeGenerator) convertToAbiType(goType string) (string, error) {
 	if goType == "Asset" || goType == "Symbol" || goType == "Name" {
 		msg += fmt.Sprintf("\nDo you mean chain.%s?", goType)
 	}
-	return "", fmt.Errorf(msg)
+	panic(t.newError(pos, msg))
+	return "", t.newError(pos, msg)
 }
 
-func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
+func (t *CodeGenerator) convertType(goType StructMember) (string, error) {
 	typ := goType.Type
 	var specialAbiType *SpecialAbiType
 	//special case for []byte type
@@ -372,15 +374,17 @@ func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
 		return "bytes", nil
 	}
 
+	pos := goType.Pos
 	for i := range t.specialAbiTypes {
 		if t.specialAbiTypes[i].name == typ {
 			specialAbiType = &t.specialAbiTypes[i]
 			typ = specialAbiType.member.Type
+			pos = specialAbiType.member.Pos
 			break
 		}
 	}
 
-	abiType, err := t.convertToAbiType(typ)
+	abiType, err := t.convertToAbiType(pos, typ)
 	if err != nil {
 		return "", err
 	}
@@ -405,12 +409,12 @@ func (t *CodeGenerator) convertType(goType MemberType) (string, error) {
 	}
 }
 
-func (t *CodeGenerator) newError(p token.Pos, msg string) error {
-	errMsg := fmt.Sprintf("%s\n%s", t.getLineInfo(p), msg)
-	return errors.New(errMsg)
+func (t *CodeGenerator) newError(p token.Pos, format string, args ...interface{}) error {
+	errMsg := fmt.Sprintf(format, args...)
+	return errors.New(t.getLineInfo(p) + ":\n" + errMsg)
 }
 
-func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberList *[]MemberType, isStructField bool, ignore bool) error {
+func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberList *[]StructMember, isStructField bool, ignore bool) error {
 	if ignore {
 		_, ok := field.Type.(*ast.StarExpr)
 		if !ok {
@@ -426,14 +430,16 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 	case *ast.Ident:
 		if field.Names != nil {
 			for _, v := range field.Names {
-				member := MemberType{}
+				member := StructMember{}
+				member.Pos = field.Pos()
 				member.Name = v.Name
 				member.Type = fieldType.Name
 				*memberList = append(*memberList, member)
 			}
 		} else {
 			//TODO: parse anonymous struct
-			member := MemberType{}
+			member := StructMember{}
+			member.Pos = field.Pos()
 			member.Name = ""
 			member.Type = fieldType.Name
 			*memberList = append(*memberList, member)
@@ -451,7 +457,8 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 		switch v := fieldType.Elt.(type) {
 		case *ast.Ident:
 			for _, name := range field.Names {
-				member := MemberType{}
+				member := StructMember{}
+				member.Pos = field.Pos()
 				member.Name = name.Name
 				member.Type = v.Name
 				member.LeadingType = leadingType
@@ -460,7 +467,8 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 		case *ast.ArrayType:
 			for _, name := range field.Names {
 				if ident, ok := v.Elt.(*ast.Ident); ok {
-					member := MemberType{}
+					member := StructMember{}
+					member.Pos = field.Pos()
 					member.Name = name.Name
 					member.Type = "[]" + ident.Name
 					member.LeadingType = leadingType
@@ -473,7 +481,8 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 		case *ast.SelectorExpr:
 			ident := v.X.(*ast.Ident)
 			for _, name := range field.Names {
-				member := MemberType{}
+				member := StructMember{}
+				member.Pos = field.Pos()
 				member.Name = name.Name
 				member.Type = ident.Name + "." + v.Sel.Name
 				member.LeadingType = leadingType
@@ -486,7 +495,8 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 	case *ast.SelectorExpr:
 		ident := fieldType.X.(*ast.Ident)
 		for _, name := range field.Names {
-			member := MemberType{}
+			member := StructMember{}
+			member.Pos = field.Pos()
 			member.Name = name.Name
 			member.Type = ident.Name + "." + fieldType.Sel.Name
 			// member.IsArray = false
@@ -495,14 +505,15 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 	case *ast.StarExpr:
 		//Do not parse pointer type in struct
 		if isStructField {
-			log.Printf("+++++++Pointer type %v in %s ignored\n", field.Names, structName)
+			log.Printf("Warning: Pointer type %v in %s ignored\n", field.Names, structName)
 			return nil
 		}
 
 		switch v2 := fieldType.X.(type) {
 		case *ast.Ident:
 			for _, name := range field.Names {
-				member := MemberType{}
+				member := StructMember{}
+				member.Pos = field.Pos()
 				member.Name = name.Name
 				member.Type = v2.Name
 				member.LeadingType = TYPE_POINTER
@@ -512,7 +523,8 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 			switch x := v2.X.(type) {
 			case *ast.Ident:
 				for _, name := range field.Names {
-					member := MemberType{}
+					member := StructMember{}
+					member.Pos = field.Pos()
 					member.Name = name.Name
 					member.Type = x.Name + "." + v2.Sel.Name
 					member.LeadingType = TYPE_POINTER
@@ -525,13 +537,12 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 			panic("Unhandled pointer type:" + fmt.Sprintf("%[1]v %[1]T", v2))
 		}
 	default:
-		errMsg := fmt.Sprintf("Unsupported field: %v", field.Names)
-		return t.newError(field.Pos(), errMsg)
+		return t.newError(field.Pos(), "Unsupported field: %v", field.Names)
 	}
 	return nil
 }
 
-func (t *CodeGenerator) parseSpecialAbiType(specialType int, packageName string, v *ast.GenDecl) bool {
+func (t *CodeGenerator) parseSpecialAbiType(packageName string, v *ast.GenDecl) bool {
 	extension := SpecialAbiType{}
 	if len(v.Specs) != 1 {
 		return false
@@ -565,27 +576,10 @@ func (t *CodeGenerator) parseSpecialAbiType(specialType int, packageName string,
 	ident := typ.X.(*ast.Ident)
 	if ident.Name+"."+typ.Sel.Name == "chain.BinaryExtension" {
 		extension.typ = BinaryExtensionType
-		if specialType != BinaryExtensionType {
-			log.Printf("warning: struct %s declare itself as a binary extension abi type, but not embeded chain.BinaryExtension", extension.name)
-			return false
-		}
 	} else if ident.Name+"."+typ.Sel.Name == "chain.Optional" {
 		extension.typ = OptionalType
-		if specialType != OptionalType {
-			log.Printf("warning: struct %s declare itself as a optional abi type, but not embeded chain.BinaryExtension", extension.name)
-			return false
-		}
 	} else {
-		if specialType == BinaryExtensionType {
-			log.Printf("warning: struct %s should embeded chain.BinaryExtension struct", extension.name)
-		} else if specialType == OptionalType {
-			log.Printf("warning: struct %s should embeded chain.Optional struct", extension.name)
-		}
 		return false
-	}
-
-	for _, field := range _struct.Fields.List {
-		log.Println("field:", field.Names)
 	}
 
 	field2 := _struct.Fields.List[1]
@@ -598,20 +592,37 @@ func (t *CodeGenerator) parseSpecialAbiType(specialType int, packageName string,
 	switch typ := field2.Type.(type) {
 	case *ast.Ident:
 		extension.member.Type = typ.Name
+		extension.member.Pos = typ.Pos()
 	case *ast.SelectorExpr:
 		ident := typ.X.(*ast.Ident)
 		extension.member.Type = ident.Name + "." + typ.Sel.Name
+		extension.member.Pos = typ.Pos()
 	default:
-		panic("unknown filed type")
+		// err := t.newError(v.Pos(), "Unsupported type: %[1]T %[1]v", typ)
+		//panic(err)
+		return false
 	}
 	t.specialAbiTypes = append(t.specialAbiTypes, extension)
 	return true
+}
+
+func splitAndTrimSpace(s string, sep string) []string {
+	parts := strings.Split(strings.TrimSpace(s), sep)
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
 }
 
 func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 	if v.Tok != token.TYPE {
 		return nil
 	}
+
+	if t.parseSpecialAbiType(packageName, v) {
+		return nil
+	}
+
 	info := StructInfo{}
 	info.PackageName = packageName
 	isContractStruct := false
@@ -619,13 +630,7 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 		n := len(v.Doc.List)
 		doc := v.Doc.List[n-1]
 		text := strings.TrimSpace(doc.Text)
-		if text == "//binary_extension" {
-			t.parseSpecialAbiType(BinaryExtensionType, packageName, v)
-			return nil
-		} else if text == "//optional" {
-			t.parseSpecialAbiType(OptionalType, packageName, v)
-			return nil
-		} else if strings.HasPrefix(text, "//table") {
+		if strings.HasPrefix(text, "//table") {
 			//items := Split(text)
 			parts := strings.Fields(text)
 			if len(parts) == 2 && (parts[0] == "//table") {
@@ -674,65 +679,73 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 		for _, field := range vv.Fields.List {
 			//*ast.FuncType *ast.Ident
 			//TODO panic on FuncType
-			if info.TableName != "" && field.Comment != nil {
-				comment := field.Comment.List[0]
-				indexText := strings.TrimSpace(comment.Text)
-				indexInfo := strings.Split(indexText, ":")
-				//parse comment like://primary:t.primary
-				if len(indexInfo) > 1 {
-					dbType := strings.TrimSpace(indexInfo[0])
-					if dbType == "//primary" {
-						if len(indexInfo) == 2 {
-							primary := strings.TrimSpace(indexInfo[1])
-							if primary == "" {
-								return t.newError(comment.Pos(), "Empty primary key in struct "+name)
-							}
-
-							if info.PrimaryKey != "" {
-								return t.newError(comment.Pos(), "Duplicated primary key in struct "+name)
-							}
-							info.PrimaryKey = primary
-						} else {
-							errMsg := fmt.Sprintf("Invalid primary key in struct %s: %s", name, indexText)
-							return t.newError(comment.Pos(), errMsg)
-						}
-					} else if _, ok := t.indexTypeMap[dbType[2:]]; ok {
-						if len(indexInfo) != 4 {
-							errMsg := fmt.Sprintf("Invalid index DB in struct %s: %s", name, indexText)
-							return t.newError(comment.Pos(), errMsg)
-						}
-
-						idx := dbType[2:]
-						name := strings.TrimSpace(indexInfo[1])
-						if name == "" {
-							return t.newError(comment.Pos(), "Invalid name in: "+indexText)
-						}
-
-						for i := range info.SecondaryIndexes {
-							if info.SecondaryIndexes[i].Name == name {
-								errMsg := fmt.Sprintf("Duplicated index name %s in %s", name, indexText)
-								return t.newError(comment.Pos(), errMsg)
-							}
-						}
-
-						getter := strings.TrimSpace(indexInfo[2])
-						if getter == "" {
-							return t.newError(comment.Pos(), "Invalid getter in: "+indexText)
-						}
-
-						setter := strings.TrimSpace(indexInfo[3])
-						if setter == "" {
-							return t.newError(comment.Pos(), "Invalid setter in: "+indexText)
-						}
-						indexInfo := SecondaryIndexInfo{idx, name, getter, setter}
-						info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
-					}
-				}
-			}
-
 			err := t.parseField(name, field, &info.Members, true, false)
 			if err != nil {
 				return err
+			}
+
+			if info.TableName == "" {
+				continue
+			}
+
+			if field.Comment == nil {
+				continue
+			}
+
+			comment := field.Comment.List[0]
+			indexText := comment.Text
+			indexInfo := splitAndTrimSpace(comment.Text, ":")
+			//parse comment like://primary:t.primary
+			if len(indexInfo) <= 1 {
+				continue
+			}
+
+			dbType := indexInfo[0]
+			if dbType == "//primary" {
+				if len(indexInfo) == 2 {
+					primary := indexInfo[1]
+					if primary == "" {
+						return t.newError(comment.Pos(), "Empty primary key in struct "+name)
+					}
+
+					if info.PrimaryKey != "" {
+						return t.newError(comment.Pos(), "Duplicated primary key in struct "+name)
+					}
+					info.PrimaryKey = primary
+				} else {
+					errMsg := fmt.Sprintf("Invalid primary key in struct %s: %s", name, indexText)
+					return t.newError(comment.Pos(), errMsg)
+				}
+			} else if _, ok := t.indexTypeMap[dbType[2:]]; ok {
+				if len(indexInfo) != 4 {
+					errMsg := fmt.Sprintf("Invalid index DB in struct %s: %s", name, indexText)
+					return t.newError(comment.Pos(), errMsg)
+				}
+
+				idx := dbType[2:]
+				name := indexInfo[1]
+				if name == "" {
+					return t.newError(comment.Pos(), "Invalid name in: "+indexText)
+				}
+
+				for i := range info.SecondaryIndexes {
+					if info.SecondaryIndexes[i].Name == name {
+						errMsg := fmt.Sprintf("Duplicated index name %s in %s", name, indexText)
+						return t.newError(comment.Pos(), errMsg)
+					}
+				}
+
+				getter := indexInfo[2]
+				if getter == "" {
+					return t.newError(comment.Pos(), "Invalid getter in: "+indexText)
+				}
+
+				setter := indexInfo[3]
+				if setter == "" {
+					return t.newError(comment.Pos(), "Invalid setter in: "+indexText)
+				}
+				indexInfo := SecondaryIndexInfo{idx, name, getter, setter}
+				info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
 			}
 		}
 		t.structs = append(t.structs, info)
@@ -747,7 +760,6 @@ func IsNameValid(name string) bool {
 func (t *CodeGenerator) getLineInfo(p token.Pos) string {
 	pos := t.fset.Position(p)
 	return pos.String()
-	// log.Println(pos.String())
 }
 
 func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
@@ -987,7 +999,7 @@ func (t *CodeGenerator) packArrayType(goName string, goType string) {
 	}
 }
 
-func (t *CodeGenerator) packType(member MemberType) {
+func (t *CodeGenerator) packType(member StructMember) {
 	if member.Name == "" {
 		log.Printf("anonymount Type does not supported currently: %s", member.Type)
 		return
@@ -1075,7 +1087,7 @@ func (t *CodeGenerator) unpackBaseType(varName string, typ string) {
 	// extended_asset
 }
 
-func (t *CodeGenerator) unpackMember(member MemberType) {
+func (t *CodeGenerator) unpackMember(member StructMember) {
 	if member.Name == "" {
 		log.Printf("anonymount Type does not supported currently: %s", member.Type)
 		return
@@ -1093,7 +1105,7 @@ func (t *CodeGenerator) unpackMember(member MemberType) {
 	}
 }
 
-func (t *CodeGenerator) genStruct(structName string, members []MemberType) {
+func (t *CodeGenerator) genStruct(structName string, members []StructMember) {
 	log.Println("+++action", structName)
 	t.writeCode("type %s struct {", structName)
 	for _, member := range members {
@@ -1106,7 +1118,7 @@ func (t *CodeGenerator) genStruct(structName string, members []MemberType) {
 	t.writeCode("}\n")
 }
 
-func (t *CodeGenerator) genPackCode(structName string, members []MemberType) {
+func (t *CodeGenerator) genPackCode(structName string, members []StructMember) {
 	t.writeCode("func (t *%s) Pack() []byte {", structName)
 	t.writeCode("    enc := chain.NewEncoder(t.Size())")
 	for _, member := range members {
@@ -1115,7 +1127,7 @@ func (t *CodeGenerator) genPackCode(structName string, members []MemberType) {
 	t.writeCode("    return enc.GetBytes()\n}\n")
 }
 
-func (t *CodeGenerator) genUnpackCode(structName string, members []MemberType) {
+func (t *CodeGenerator) genUnpackCode(structName string, members []StructMember) {
 	t.writeCode("func (t *%s) Unpack(data []byte) int {", structName)
 	t.writeCode("    dec := chain.NewDecoder(data)")
 	for _, member := range members {
@@ -1124,7 +1136,7 @@ func (t *CodeGenerator) genUnpackCode(structName string, members []MemberType) {
 	t.writeCode("    return dec.Pos()\n}\n")
 }
 
-func (t *CodeGenerator) genPackCodeForSpecialStruct(specialType int, structName string, member MemberType) {
+func (t *CodeGenerator) genPackCodeForSpecialStruct(specialType int, structName string, member StructMember) {
 	if specialType == BinaryExtensionType {
 		t.writeCode(`
 func (t *%s) Pack() []byte {
@@ -1147,7 +1159,7 @@ func (t *%s) Pack() []byte {
 	}
 }
 
-func (t *CodeGenerator) genUnpackCodeForSpecialStruct(specialType int, structName string, member MemberType) {
+func (t *CodeGenerator) genUnpackCodeForSpecialStruct(specialType int, structName string, member StructMember) {
 	if specialType == BinaryExtensionType {
 		t.writeCode(`
 func (t *%s) Unpack(data []byte) int {
@@ -1179,7 +1191,7 @@ func (t *%s) Unpack(data []byte) int {
 	}
 }
 
-func (t *CodeGenerator) genSizeCodeForSpecialStruct(specialType int, structName string, member MemberType) {
+func (t *CodeGenerator) genSizeCodeForSpecialStruct(specialType int, structName string, member StructMember) {
 	if specialType == BinaryExtensionType {
 		t.writeCode("func (t *%s) Size() int {", structName)
 		t.writeCode("    size := 0")
@@ -1317,7 +1329,7 @@ func (t *CodeGenerator) calcArrayMemberSize(name string, goType string) {
 	}
 }
 
-func (t *CodeGenerator) genSizeCode(structName string, members []MemberType) {
+func (t *CodeGenerator) genSizeCode(structName string, members []StructMember) {
 	t.writeCode("func (t *%s) Size() int {", structName)
 	t.writeCode("    size := 0")
 	for _, member := range members {
@@ -1409,7 +1421,17 @@ func (t *CodeGenerator) GenCode() error {
 		t.genSizeCode(action.ActionName, action.Members)
 	}
 
-	for _, _struct := range t.structs {
+	for _, _struct := range t.abiStructsMap {
+		t.genPackCode(_struct.StructName, _struct.Members)
+		t.genUnpackCode(_struct.StructName, _struct.Members)
+		t.genSizeCode(_struct.StructName, _struct.Members)
+	}
+
+	for i := range t.structs {
+		_struct := &t.structs[i]
+		if _, ok := t.abiStructsMap[_struct.StructName]; ok {
+			continue
+		}
 		t.genPackCode(_struct.StructName, _struct.Members)
 		t.genUnpackCode(_struct.StructName, _struct.Members)
 		t.genSizeCode(_struct.StructName, _struct.Members)
@@ -1660,12 +1682,31 @@ func (t *CodeGenerator) Finish() {
 	t.codeFile.Close()
 }
 
+func (t *CodeGenerator) isSpecialAbiType(goType string) (string, bool) {
+	for _, specialType := range t.specialAbiTypes {
+		if specialType.name == goType {
+			return specialType.member.Type, true
+		}
+	}
+	return "", false
+}
+
 func (t *CodeGenerator) addAbiStruct(s *StructInfo) {
 	t.abiStructsMap[s.StructName] = s
 	for _, member := range s.Members {
 		s2, ok := t.structMap[member.Type]
 		if ok {
 			t.addAbiStruct(s2)
+			continue
+		}
+
+		typeName, ok := t.isSpecialAbiType(member.Type)
+		if ok {
+			log.Println("++++++++++isSpecialAbiType:", typeName)
+			s2, ok := t.structMap[typeName]
+			if ok {
+				t.addAbiStruct(s2)
+			}
 		}
 	}
 }
@@ -1724,10 +1765,11 @@ func GenerateCode(inFile string) error {
 	}
 
 	gen.Analyse()
-	if err := gen.GenCode(); err != nil {
+	if err := gen.GenAbi(); err != nil {
 		return err
 	}
-	if err := gen.GenAbi(); err != nil {
+
+	if err := gen.GenCode(); err != nil {
 		return err
 	}
 	gen.Finish()

@@ -120,3 +120,17 @@ class Test(object):
         r = self.chain.push_action('hello', 'zzzzzzzzzzzzj', b'')
 
         r = self.chain.push_action('hello', 'testpointer', {'a': 'alice'})
+
+    def test_math(self):
+        with open('test.wasm', 'rb') as f:
+            code = f.read()
+        with open('test.abi', 'r') as f:
+            abi = f.read()
+
+        self.chain.deploy_contract('hello', code, abi, 0)
+        try:
+            r = self.chain.push_action('hello', 'testmath', b'')
+            # r = self.chain.push_action('hello', 'sayhello', b'hello,world')
+            print_console(r)
+        except Exception as e:
+            print_except(e.args[0])
