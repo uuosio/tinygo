@@ -1162,6 +1162,22 @@ func parseGoLinkFlag(flagsString string) (map[string]map[string]string, error) {
 	return map[string]map[string]string(globalVarValues), nil
 }
 
+func createContractDir(contractDir string) error {
+	if info, err := os.Stat(contractDir); err == nil {
+		if info.IsDir() {
+			fmt.Fprintf(os.Stderr, "%s directory already exists.\n", contractDir)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s is a existed file.\n", contractDir)
+		}
+		os.Exit(1)
+	}
+
+	if err := os.Mkdir(contractDir, 0755); err != nil {
+		return fmt.Errorf("failed to create contract directory: %v", err)
+	}
+	return nil
+}
+
 func genFile(fileName string, mod os.FileMode, format string, args ...interface{}) {
 	if _, err := os.Stat(fileName); err == nil {
 		fmt.Fprintf(os.Stderr, "%s already exists.\n", fileName)
@@ -1169,6 +1185,17 @@ func genFile(fileName string, mod os.FileMode, format string, args ...interface{
 	}
 	content := fmt.Sprintf(format, args...)
 	ioutil.WriteFile(fileName, []byte(content), mod)
+}
+
+func runCommand(command string) {
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to run command: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func main() {
@@ -1204,6 +1231,7 @@ func main() {
 	cpuprofile := flag.String("cpuprofile", "", "cpuprofile output")
 	genCode := flag.Bool("gen-code", true, "Generate extra code for Smart Contracts")
 	strip := flag.Bool("strip", true, "Strip Custom Section of Wasm File")
+	template := flag.String("template", "", "template for generating code")
 
 	var flagJSON, flagDeps, flagTest *bool
 	if command == "help" || command == "list" {
@@ -1329,17 +1357,25 @@ func main() {
 			usage()
 			os.Exit(1)
 		}
+
 		contractName := flag.Arg(0)
 		if !IsNameValid(contractName) {
 			fmt.Fprintln(os.Stderr, "Invalid contract name:", contractName)
 			os.Exit(1)
 		}
-		contractFile := contractName + ".go"
-		genFile(contractFile, 0644, cContractTemplate, contractName)
-		genFile("utils.go", 0644, cUtils)
-		genFile("tables.go", 0644, cTables)
-		genFile("structs.go", 0644, cStructs)
-		genFile("build.sh", 0777, cBuild, contractName)
+
+		if *template == "" || *template == "simple" {
+			createContractDir(contractName)
+			err = os.Chdir(contractName)
+			contractFile := contractName + ".go"
+			genFile(contractFile, 0644, cContractTemplate, contractName)
+			genFile("utils.go", 0644, cUtils)
+			genFile("tables.go", 0644, cTables)
+			genFile("structs.go", 0644, cStructs)
+			genFile("build.sh", 0777, cBuild, contractName)
+			runCommand("go mod init " + contractName)
+			runCommand("go mod tidy")
+		}
 	case "gencode":
 		pkgName := "."
 		if flag.NArg() == 1 {
