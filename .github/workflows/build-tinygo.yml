@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         # os: ['windows-latest', 'ubuntu-latest', 'macos-latest']
-        os: ['ubuntu-latest']
+        os: ['macos-latest']
       fail-fast: false
 
     steps:
@@ -28,11 +28,11 @@ jobs:
           submodules: true
       - name: download llvm-build
         run: |
-          wget https://github.com/uuosio/build-llvm/releases/download/v0.0.1/llvm-build-ubuntu-latest.tar.gz
-          tar -xf llvm-build-ubuntu-latest.tar.gz
-          ls llvm-build
+          wget https://github.com/uuosio/build-llvm/releases/download/v0.0.1/llvm-build-${{ matrix.os }}.tar.gz
+          tar -xf llvm-build-${{ matrix.os }}.tar.gz
       - name: Build tinygo
         run: |
+          make llvm-source
           make wasi-libc-eosio
           make
       - name: Testing
