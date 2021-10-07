@@ -184,7 +184,7 @@ lib/wasi-libc-eosio/sysroot/lib/wasm32-wasi/libc.a:
 	cd lib/wasi-libc-eosio && make -j4 WASM_CC=$(CLANG) WASM_AR=$(LLVM_AR) WASM_NM=$(LLVM_NM)
 
 eosio-go:
-	cp -p tools/eosio-go/eosio-go build/
+	cd tools/eosio-go;go build -o ../../build/eosio-go$(EXE) eosio-go.go
 
 eosio-strip:
 	cd tools/eosio-strip;go build -o ../../build/eosio-strip$(EXE) .
