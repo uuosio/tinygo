@@ -488,7 +488,7 @@ build/release: tinygo gen-device wasi-libc
 	@echo copying source files
 	@cp -p  build/tinygo$(EXE)           build/release/tinygo/bin
 	@cp -p  build/eosio-strip$(EXE)       build/release/tinygo/bin
-	@cp -p  tools/eosio-go/eosio-go      build/release/tinygo/bin
+	@cp -p  build/eosio-go$(EXE)      build/release/tinygo/bin
 	@cp -p $(abspath $(CLANG_SRC))/lib/Headers/*.h build/release/tinygo/lib/clang/include
 	@cp -rp lib/CMSIS/CMSIS/Include      build/release/tinygo/lib/CMSIS/CMSIS
 	@cp -rp lib/CMSIS/README.md          build/release/tinygo/lib/CMSIS
