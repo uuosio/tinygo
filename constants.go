@@ -316,3 +316,28 @@ type MyStruct struct {
 const cBuild = `
 eosio-go build -o %[1]s.wasm .
 `
+
+const cTestScript = `
+import os
+from uuoskit import uuosapi, wallet
+
+# modify your test account here
+test_account1 = 'helloworld11'
+# modify your test account private key here
+wallet.import_key('test', '5JRYimgLBrRLCBAcjHUWCYRv3asNedTYYzVgmiU4q2ZVxMBiJXL')
+# modify test node here
+uuosapi.set_node('https://testnode.uuos.network:8443')
+
+with open('%[1]s.wasm', 'rb') as f:
+    code = f.read()
+with open('%[1]s.abi', 'rb') as f:
+    abi = f.read()
+
+try:
+    uuosapi.deploy_contract(test_account1, code, abi, vm_type=0)
+except Exception as e:
+    print(e)
+
+r = uuosapi.push_action(test_account1, 'sayhello', {'name': 'alice'})
+print(r['processed']['action_traces'][0]['console'])
+`

@@ -1372,6 +1372,7 @@ func main() {
 			genFile("utils.go", 0644, cUtils)
 			genFile("tables.go", 0644, cTables)
 			genFile("structs.go", 0644, cStructs)
+			genFile("test.py", 0644, cTestScript, contractName)
 			genFile("build.sh", 0777, cBuild, contractName)
 			runCommand("go", "mod", "init", contractName)
 			runCommand("go", "mod", "tidy")
