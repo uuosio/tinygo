@@ -1187,8 +1187,8 @@ func genFile(fileName string, mod os.FileMode, format string, args ...interface{
 	ioutil.WriteFile(fileName, []byte(content), mod)
 }
 
-func runCommand(command string) {
-	cmd := exec.Command("sh", "-c", command)
+func runCommand(command string, args ...string) {
+	cmd := exec.Command(command, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
@@ -1373,8 +1373,8 @@ func main() {
 			genFile("tables.go", 0644, cTables)
 			genFile("structs.go", 0644, cStructs)
 			genFile("build.sh", 0777, cBuild, contractName)
-			runCommand("go mod init " + contractName)
-			runCommand("go mod tidy")
+			runCommand("go", "mod", "init", contractName)
+			runCommand("go", "mod", "tidy")
 		}
 	case "gencode":
 		pkgName := "."
