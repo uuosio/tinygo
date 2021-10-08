@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -18,13 +19,23 @@ func runCommand(command string, args ...string) {
 	}
 }
 
+func FindTinygo() string {
+	exe, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	exePath := filepath.Dir(exe)
+	return filepath.Join(exePath, "tinygo")
+}
+
 func main() {
+	tinygo := FindTinygo()
 	args := []string{"build", "-x", "-gc=leaking", "-target", "eosio", "-wasm-abi=generic", "-scheduler=none", "-opt", "z"}
 	if len(os.Args) >= 2 && os.Args[1] == "build" {
 		args = append(args, os.Args[2:]...)
-		fmt.Println("tinygo", strings.Join(args, " "))
-		runCommand("tinygo", args...)
+		fmt.Println(tinygo, strings.Join(args, " "))
+		runCommand(tinygo, args...)
 	} else {
-		runCommand("tinygo", os.Args[1:]...)
+		runCommand(tinygo, os.Args[1:]...)
 	}
 }
