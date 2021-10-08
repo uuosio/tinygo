@@ -1367,6 +1367,9 @@ func main() {
 		if *template == "" || *template == "simple" {
 			createContractDir(contractName)
 			err = os.Chdir(contractName)
+			if err != nil {
+				panic(err)
+			}
 			contractFile := contractName + ".go"
 			genFile(contractFile, 0644, cContractTemplate, contractName)
 			genFile("utils.go", 0644, cUtils)
@@ -1374,6 +1377,9 @@ func main() {
 			genFile("structs.go", 0644, cStructs)
 			genFile("test.py", 0644, cTestScript, contractName)
 			genFile("build.sh", 0777, cBuild, contractName)
+			if runtime.GOOS == "windows" {
+				genFile("build.bat", 0777, cBuild, contractName)
+			}
 			runCommand("go", "mod", "init", contractName)
 			runCommand("go", "mod", "tidy")
 		}
