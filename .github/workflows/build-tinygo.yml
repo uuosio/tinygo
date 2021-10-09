@@ -2,11 +2,11 @@ name: build tinygo
 
 on:
   push:
-    branches: [ eosio-dev ]
+    # branches: [ eosio-dev ]
     tags:
       - "v*.*.*"
-  pull_request:
-    branches: [ eosio-dev ]
+  # pull_request:
+  #   branches: [ eosio-dev ]
 
 jobs:
   run:
