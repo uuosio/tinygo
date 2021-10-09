@@ -852,7 +852,7 @@ func (t *CodeGenerator) ParseGoFile(goFile string) error {
 		return nil
 	}
 
-	log.Println("parse file:", goFile)
+	log.Println("Processing file:", goFile)
 
 	for _, decl := range file.Decls {
 		switch v := decl.(type) {
