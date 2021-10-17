@@ -6,12 +6,6 @@ type %[1]sDB struct {
 	I database.MultiIndexInterface
 }
 
-func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
-	table := chain.Name{N:uint64(%[2]d)} //table name: %[3]s
-	db := database.NewMultiIndex(code, scope, table, %[1]sDBNameToIndex, %[1]sSecondaryTypes, %[1]sUnpacker)
-	return &%[1]sDB{db, db}
-}
-
 func (mi *%[1]sDB) Store(v *%[1]s, payer chain.Name) {
 	mi.I.Store(v, payer)
 }
@@ -35,6 +29,23 @@ func (mi *%[1]sDB) GetByIterator(it database.Iterator) (*%[1]s, error) {
 func (mi *%[1]sDB) Update(it database.Iterator, v *%[1]s, payer chain.Name) {
 	mi.I.Update(it, v, payer)
 }
+`
+
+const cNewMultiIndexTemplate = `
+func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
+	table := chain.Name{N:uint64(%[2]d)} //table name: %[3]s
+	if table.N&uint64(0x0f) != 0 {
+		// Limit table names to 12 characters so that the last character (4 bits) can be used to distinguish between the secondary indices.
+		panic("NewMultiIndex:Invalid multi-index table name ")
+	}
+
+	mi := &database.MultiIndex{}
+	mi.SetTable(code, scope, table)
+	mi.DB = database.NewDBI64(code, scope, table)
+	mi.IdxDBNameToIndex = %[1]sDBNameToIndex
+	mi.IndexTypes = %[1]sSecondaryTypes
+	mi.IDXDBs = make([]database.SecondaryDB, len(%[1]sSecondaryTypes))
+	mi.Unpack = %[1]sUnpacker
 `
 
 const cGetDBTemplate = `
