@@ -1515,16 +1515,17 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 		t.writeCode(cDBTemplate, table.StructName, StringToName(table.TableName), table.TableName)
 		t.writeCode(cNewMultiIndexTemplate, table.StructName, StringToName(table.TableName), table.TableName)
 		for i, index := range table.SecondaryIndexes {
+			idxTable := (StringToName(table.TableName) & uint64(0xfffffffffffffff0)) | uint64(i)
 			if index.Type == "IDX64" {
-				t.writeCode("mi.IDXDBs[%d] = database.NewIdxDB64(i, code.N, scope.N, idxTable)", i)
+				t.writeCode("    mi.IDXDBs[%[1]d] = database.NewIdxDB64(%[1]d, code.N, scope.N, uint64(%[2]d))", i, idxTable)
 			} else if index.Type == "IDX128" {
-				t.writeCode("mi.IDXDBs[%d] = database.NewIdxDB128(i, code.N, scope.N, idxTable)", i)
+				t.writeCode("    mi.IDXDBs[%[1]d] = database.NewIdxDB128(%[1]d, code.N, scope.N, uint64(%[2]d))", i, idxTable)
 			} else if index.Type == "IDX256" {
-				t.writeCode("mi.IDXDBs[%d] = database.NewIdxDB256(i, code.N, scope.N, idxTable)", i)
+				t.writeCode("    mi.IDXDBs[%[1]d] = database.NewIdxDB256(%[1]d, code.N, scope.N, uint64(%[2]d))", i, idxTable)
 			} else if index.Type == "IDXFloat64" {
-				t.writeCode("mi.IDXDBs[%d] = database.NewIdxDBFloat64(i, code.N, scope.N, idxTable)", i)
+				t.writeCode("    mi.IDXDBs[%[1]d] = database.NewIdxDBFloat64(%[1]d, code.N, scope.N, uint64(%[2]d))", i, idxTable)
 			} else if index.Type == "IDXFloat128" {
-				t.writeCode("mi.IDXDBs[%d] = database.NewIdxDBFloat128(i, code.N, scope.N, idxTable)", i)
+				t.writeCode("    mi.IDXDBs[%[1]d] = database.NewIdxDBFloat128(%[1]d, code.N, scope.N, uint64(%[2]d))", i, idxTable)
 			}
 		}
 		t.writeCode("    return &%[1]sDB{mi, mi}\n}", table.StructName)
