@@ -330,7 +330,12 @@ eosio-go build -o %[1]s.wasm .
 
 const cTestScript = `
 import os
-from uuoskit import uuosapi, wallet
+import sys
+try:
+	from uuoskit import uuosapi, wallet
+except:
+	print('uuoskit not found, please install it with "pip install uuoskit"')
+	sys.exit(-1)
 
 # modify your test account here
 test_account1 = 'helloworld11'
