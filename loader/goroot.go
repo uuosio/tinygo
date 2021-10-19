@@ -254,9 +254,9 @@ func pathsToOverride(buildTags []string) map[string]bool {
 		paths["syscall/"] = true // include syscall/js
 	}
 
-	if isEosioTarget(buildTags) {
-		paths["log/"] = false
-	}
+	// if isEosioTarget(buildTags) {
+	// 	paths["log/"] = false
+	// }
 	return paths
 }
 

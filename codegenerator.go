@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/fatih/color"
 )
 
 /*
@@ -841,11 +843,52 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	return nil
 }
 
+var largePackages = []string{
+	"\"strconv\"",
+	"\"fmt\"",
+}
+
+var errorPackages = []string{
+	"\"log\"",
+}
+
+func isLargePackage(pkgName string) bool {
+	for i := range largePackages {
+		if pkgName == largePackages[i] {
+			return true
+		}
+	}
+	return false
+}
+
+func isErrorPackage(pkgName string) bool {
+	for i := range errorPackages {
+		if pkgName == errorPackages[i] {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *CodeGenerator) ParseGoFile(goFile string) error {
 	t.currentFile = goFile
 	file, err := parser.ParseFile(t.fset, goFile, nil, parser.ParseComments)
 	if err != nil {
 		return err
+	}
+
+	for _, imp := range file.Imports {
+		pkgName := imp.Path.Value
+		if isLargePackage(pkgName) {
+			color.Set(color.FgYellow)
+			log.Printf("WARNING: use of package %s will greatly increase Smart Contract size\n", pkgName)
+			color.Unset()
+		} else if isErrorPackage(pkgName) {
+			color.Set(color.FgRed)
+			fmt.Printf("ERROR: use of package %s is not allowed in Smart Contracts!\n", pkgName)
+			color.Unset()
+			os.Exit(-1)
+		}
 	}
 
 	if file.Name.Name != "main" {
