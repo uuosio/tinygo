@@ -3,15 +3,14 @@ package main
 const cDBTemplate = `
 type %[1]sDB struct {
 	database.MultiIndexInterface
-	I database.MultiIndexInterface
 }
 
 func (mi *%[1]sDB) Store(v *%[1]s, payer chain.Name) {
-	mi.I.Store(v, payer)
+	mi.MultiIndexInterface.Store(v, payer)
 }
 
 func (mi *%[1]sDB) Get(id uint64) (database.Iterator, *%[1]s) {
-	it, data := mi.I.Get(id)
+	it, data := mi.MultiIndexInterface.Get(id)
 	if !it.IsOk() {
 		return it, nil
 	}
@@ -19,7 +18,7 @@ func (mi *%[1]sDB) Get(id uint64) (database.Iterator, *%[1]s) {
 }
 
 func (mi *%[1]sDB) GetByIterator(it database.Iterator) (*%[1]s, error) {
-	data, err := mi.I.GetByIterator(it)
+	data, err := mi.MultiIndexInterface.GetByIterator(it)
 	if err != nil {
 		return nil, err
 	}
@@ -27,7 +26,7 @@ func (mi *%[1]sDB) GetByIterator(it database.Iterator) (*%[1]s, error) {
 }
 
 func (mi *%[1]sDB) Update(it database.Iterator, v *%[1]s, payer chain.Name) {
-	mi.I.Update(it, v, payer)
+	mi.MultiIndexInterface.Update(it, v, payer)
 }
 `
 

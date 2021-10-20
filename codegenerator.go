@@ -1575,7 +1575,7 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 				t.writeCode("    mi.IDXDBs[%[1]d] = database.NewIdxDBFloat128(%[1]d, code.N, scope.N, uint64(%[2]d))", i, idxTable)
 			}
 		}
-		t.writeCode("    return &%[1]sDB{mi, mi}\n}", table.StructName)
+		t.writeCode("    return &%[1]sDB{mi}\n}", table.StructName)
 
 		for i := range table.SecondaryIndexes {
 			index := &table.SecondaryIndexes[i]
