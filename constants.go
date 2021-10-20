@@ -50,11 +50,7 @@ func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
 const cGetDBTemplate = `
 func (mi *%[1]sDB) GetIdxDB%[2]s() *database.%[4]sI {
 	secondaryDB := mi.GetIdxDBByIndex(%[3]d)
-	_secondaryDB, ok := secondaryDB.(*database.%[4]s)
-	if !ok {
-		panic("Cannot convert secondary db to *database.%[4]s")
-	}
-	return &database.%[4]sI{secondaryDB, _secondaryDB}
+	return &database.%[4]sI{secondaryDB}
 }
 `
 
