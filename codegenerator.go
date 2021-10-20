@@ -628,13 +628,14 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 	info := StructInfo{}
 	info.PackageName = packageName
 	isContractStruct := false
+	var lastLineDoc string
 	if v.Doc != nil {
 		n := len(v.Doc.List)
 		doc := v.Doc.List[n-1]
-		text := strings.TrimSpace(doc.Text)
-		if strings.HasPrefix(text, "//table") {
-			//items := Split(text)
-			parts := strings.Fields(text)
+		lastLineDoc = strings.TrimSpace(doc.Text)
+		if strings.HasPrefix(lastLineDoc, "//table") {
+			//items := Split(lastLineDoc)
+			parts := strings.Fields(lastLineDoc)
 			if len(parts) == 2 && (parts[0] == "//table") {
 				tableName := parts[1]
 				if !IsNameValid(tableName) {
@@ -651,8 +652,8 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 					info.Singleton = true
 				}
 			}
-		} else if strings.HasPrefix(text, "//contract") {
-			parts := strings.Fields(text)
+		} else if strings.HasPrefix(lastLineDoc, "//contract") {
+			parts := strings.Fields(lastLineDoc)
 			if len(parts) == 2 {
 				name := parts[1]
 				if t.contractName != "" {
@@ -751,6 +752,9 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 			}
 		}
 		t.structs = append(t.structs, info)
+		if strings.TrimSpace(lastLineDoc) == "//packer" {
+			t.abiStructsMap[info.StructName] = &t.structs[len(t.structs)-1]
+		}
 	}
 	return nil
 }
@@ -1471,15 +1475,15 @@ func (t *CodeGenerator) GenCode() error {
 		t.genSizeCode(_struct.StructName, _struct.Members)
 	}
 
-	for i := range t.structs {
-		_struct := &t.structs[i]
-		if _, ok := t.abiStructsMap[_struct.StructName]; ok {
-			continue
-		}
-		t.genPackCode(_struct.StructName, _struct.Members)
-		t.genUnpackCode(_struct.StructName, _struct.Members)
-		t.genSizeCode(_struct.StructName, _struct.Members)
-	}
+	// for i := range t.structs {
+	// 	_struct := &t.structs[i]
+	// 	if _, ok := t.abiStructsMap[_struct.StructName]; ok {
+	// 		continue
+	// 	}
+	// 	t.genPackCode(_struct.StructName, _struct.Members)
+	// 	t.genUnpackCode(_struct.StructName, _struct.Members)
+	// 	t.genSizeCode(_struct.StructName, _struct.Members)
+	// }
 
 	for i := range t.structs {
 		table := &t.structs[i]

@@ -7,6 +7,15 @@ import (
 	"github.com/uuosio/chain/logger"
 )
 
+type NotAPacker struct {
+	value int //int type is not a supported abi base type
+}
+
+//packer
+type GenPackUnpack struct {
+	value chain.Checksum256
+}
+
 //table mysingleton singleton
 type Singleton struct {
 	a1 uint64
