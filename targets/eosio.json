@@ -4,10 +4,10 @@
 	"goos":          "linux",
 	"goarch":        "arm",
 	"linker":        "wasm-ld",
-	"libc":          "wasi-libc-eosio",
+    "libc":          "eosio-libc",
 	"cflags": [
 		"--target=wasm32--wasi",
-		"--sysroot={root}/lib/wasi-libc-eosio/sysroot",
+        "--sysroot={root}/lib/eosio-libc/sysroot",
 		"-Oz"
 	],
 	"ldflags": [
