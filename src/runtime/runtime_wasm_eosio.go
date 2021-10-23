@@ -1,3 +1,4 @@
+//go:build tinygo.wasm && eosio
 // +build tinygo.wasm,eosio
 
 package runtime
@@ -42,7 +43,7 @@ func GetApplyArgs() (receiver uint64, code uint64, action uint64) {
 }
 
 //export _start
-func _start() {
+func _start(receiver, code, action uint64) {
 }
 
 func ticksToNanoseconds(ticks timeUnit) int64 {
