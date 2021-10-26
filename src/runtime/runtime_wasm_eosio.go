@@ -23,8 +23,11 @@ func apply(receiver uint64, code uint64, action uint64) {
 	// These need to be initialized early so that the heap can be initialized.
 	heapStart = uintptr(unsafe.Pointer(&heapStartSymbol))
 	heapEnd = uintptr(wasm_memory_size(0) * wasmPageSize)
-	__wasm_call_ctors()
 	run()
+}
+
+func init() {
+	__wasm_call_ctors()
 }
 
 func Alloc(size uintptr) unsafe.Pointer {

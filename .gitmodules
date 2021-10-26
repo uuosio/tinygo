@@ -26,3 +26,9 @@
 [submodule "lib/wasi-libc-eosio"]
 	path = lib/wasi-libc-eosio
 	url = https://github.com/uuosio/wasi-libc
+[submodule "lib/eosio-libc/musl"]
+	path = lib/eosio/libc/musl
+	url = https://github.com/uuosio/musl
+[submodule "lib/eosio/libc++/libcxx"]
+	path = lib/eosio/libc++/libcxx
+	url = https://github.com/uuosio/libcxx
