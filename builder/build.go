@@ -525,7 +525,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 		job := dummyCompileJob(path)
 		linkerDependencies = append(linkerDependencies, job)
 	case "eosio-libc":
-		path := filepath.Join(root, "lib/eosio-libc/sysroot/lib/libc.a")
+		path := filepath.Join(root, "lib/eosio/sysroot/lib/libc.a")
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			return errors.New("could not find eosio-libc, eosio-libc depends on eosio.cdt")
 		}

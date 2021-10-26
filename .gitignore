@@ -1,4 +1,3 @@
-lib/eosio-libc
 *.bk
 __pycache__
 generated.abi
