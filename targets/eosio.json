@@ -8,9 +8,15 @@
 	"cflags": [
 		"--target=wasm32--wasi",
         "--sysroot={root}/lib/eosio/sysroot",
-		"-Oz"
+		"-Oz",
+		"-I{root}/lib/eosio/sysroot/include/libc",
+		"-I{root}/lib/eosio/sysroot/include/eosiolib/capi"
 	],
 	"cxxflags": [
+		"-I{root}/lib/eosio/sysroot/include",
+		"-I{root}/lib/eosio/sysroot/include/libcxx",
+		"-I{root}/lib/eosio/sysroot/include/eosiolib/core",
+		"-I{root}/lib/eosio/sysroot/include/eosiolib/contracts",
 		"-std=c++17",
 		"-Wno-unknown-attributes"
 	],

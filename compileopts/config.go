@@ -208,14 +208,6 @@ func (c *Config) CFlags() []string {
 		root := goenv.Get("TINYGOROOT")
 		cflags = append(cflags, "-nostdlibinc", "-Xclang", "-internal-isystem", "-Xclang", filepath.Join(root, "lib", "picolibc", "newlib", "libc", "include"))
 		cflags = append(cflags, "-I"+filepath.Join(root, "lib/picolibc-include"))
-	} else if c.Target.Libc == "eosio-libc" {
-		root := goenv.Get("TINYGOROOT")
-		cflags = append(cflags, "-I"+filepath.Join(root, "/lib/eosio/sysroot/include"))
-		cflags = append(cflags, "-I"+filepath.Join(root, "/lib/eosio/sysroot/include/libc"))
-		cflags = append(cflags, "-I"+filepath.Join(root, "/lib/eosio/sysroot/include/libcxx"))
-		cflags = append(cflags, "-I"+filepath.Join(root, "/lib/eosio/sysroot/include/eosiolib/capi"))
-		cflags = append(cflags, "-I"+filepath.Join(root, "/lib/eosio/sysroot/include/eosiolib/core"))
-		cflags = append(cflags, "-I"+filepath.Join(root, "/lib/eosio/sysroot/include/eosiolib/contracts"))
 	}
 	// Always emit debug information. It is optionally stripped at link time.
 	cflags = append(cflags, "-g")
