@@ -88,7 +88,7 @@ EXTRA_LIB_NAMES = LLVMInterpreter
 # This list also includes a few tools that are necessary as part of the full
 # TinyGo build.
 NINJA_BUILD_TARGETS = clang lld llvm-config llc opt llvm-strip llvm-readelf llvm-readobj llvm-objdump llvm-objcopy llvm-ranlib llvm-ar llvm-nm $(addprefix lib/lib,$(addsuffix .a,$(LIBCLANG_NAME) $(CLANG_LIB_NAMES) $(LLD_LIB_NAMES) $(EXTRA_LIB_NAMES)))
-NINJA_BUILD_TARGETS += LLVMEosioSoftfloat LLVMEosioApply
+#NINJA_BUILD_TARGETS += LLVMEosioSoftfloat LLVMEosioApply
 
 # For static linking.
 ifneq ("$(wildcard $(LLVM_BUILDDIR)/bin/llvm-config*)","")
@@ -158,7 +158,9 @@ gen-device-rp: build/gen-device-svd
 
 # Get LLVM sources.
 $(LLVM_PROJECTDIR)/llvm:
-	git clone -b xtensa_eosio_release_11.0.0 --depth=1 https://github.com/uuosio/llvm-project $(LLVM_PROJECTDIR)
+	git clone -b xtensa_release_11.0.0 --depth=1 https://github.com/tinygo-org/llvm-project $(LLVM_PROJECTDIR)
+#	git clone -b xtensa_eosio_release_11.0.0 --depth=1 https://github.com/uuosio/llvm-project $(LLVM_PROJECTDIR)
+
 llvm-source: $(LLVM_PROJECTDIR)/llvm
 
 # Configure LLVM.
