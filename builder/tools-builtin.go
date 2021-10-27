@@ -4,9 +4,9 @@ package builder
 
 import (
 	"errors"
+	"github.com/tinygo-org/tinygo/goenv"
 	"path/filepath"
 	"unsafe"
-	"github.com/tinygo-org/tinygo/goenv"
 )
 
 /*
@@ -16,6 +16,7 @@ import (
 bool tinygo_clang_driver(int argc, char **argv);
 bool tinygo_link_elf(int argc, char **argv);
 bool tinygo_link_wasm(int argc, char **argv);
+bool tinygo_ar(int argc, char **argv);
 */
 import "C"
 
@@ -55,6 +56,8 @@ func RunTool(tool string, args ...string) error {
 		ok = C.tinygo_link_elf(C.int(len(args)), (**C.char)(buf))
 	case "wasm-ld":
 		ok = C.tinygo_link_wasm(C.int(len(args)), (**C.char)(buf))
+	case "dlltool", "ranlib", "lib", "ar":
+		ok = C.tinygo_ar(C.int(len(args)), (**C.char)(buf))
 	default:
 		return errors.New("unknown tool: " + tool)
 	}

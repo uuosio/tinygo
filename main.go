@@ -1197,7 +1197,7 @@ func main() {
 	// Early command processing, before commands are interpreted by the Go flag
 	// library.
 	switch command {
-	case "clang", "ld.lld", "wasm-ld":
+	case "clang", "ld.lld", "wasm-ld", "dlltool", "ranlib", "lib", "ar":
 		err := builder.RunTool(command, os.Args[2:]...)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
