@@ -73,6 +73,7 @@ type Package struct {
 	Files      []*ast.File
 	FileHashes map[string][]byte
 	CFlags     []string // CFlags used during CGo preprocessing (only set if CGo is used)
+	CXXFlags   []string
 	Pkg        *types.Package
 	info       types.Info
 }
@@ -400,6 +401,7 @@ func (p *Package) parseFiles() ([]*ast.File, error) {
 		}
 		generated, cflags, ldflags, accessedFiles, errs := cgo.Process(files, p.program.workingDir, p.program.fset, initialCFlags)
 		p.CFlags = append(initialCFlags, cflags...)
+		p.CXXFlags = append(p.CXXFlags, p.program.config.CXXFlags()...)
 		for path, hash := range accessedFiles {
 			p.FileHashes[path] = hash
 		}

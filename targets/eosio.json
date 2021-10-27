@@ -10,6 +10,10 @@
         "--sysroot={root}/lib/eosio/sysroot",
 		"-Oz"
 	],
+	"cxxflags": [
+		"-std=c++17",
+		"-Wno-unknown-attributes"
+	],
 	"ldflags": [
 		"--allow-undefined",
 		"--stack-first",

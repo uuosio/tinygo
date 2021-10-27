@@ -120,9 +120,6 @@ func compileAndCacheCFile(abspath, tmpdir string, cflags []string, printCommands
 	depTmpFile.Close()
 	flags := append([]string{}, cflags...)                                   // copy cflags
 	flags = append(flags, "-MD", "-MV", "-MTdeps", "-MF", depTmpFile.Name()) // autogenerate dependencies
-	if strings.HasSuffix(abspath, ".cpp") || strings.HasSuffix(abspath, ".cxx") {
-		flags = append(flags, "-std=c++17", "-Wno-unknown-attributes")
-	}
 	flags = append(flags, "-c", "-o", objTmpFile.Name(), abspath)
 	if strings.ToLower(filepath.Ext(abspath)) == ".s" {
 		// If this is an assembly file (.s or .S, lowercase or uppercase), then
