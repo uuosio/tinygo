@@ -482,7 +482,10 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	// bitcode files together.
 	for _, pkg := range lprogram.Sorted() {
 		pkg := pkg
-		for _, filename := range pkg.CFiles {
+		files := make([]string, 0, len(pkg.CFiles)+len(pkg.CXXFiles))
+		files = append(files, pkg.CFiles...)
+		files = append(files, pkg.CXXFiles...)
+		for _, filename := range files {
 			abspath := filepath.Join(pkg.Dir, filename)
 			job := &compileJob{
 				description: "compile CGo file " + abspath,

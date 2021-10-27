@@ -51,6 +51,7 @@ type PackageJSON struct {
 	GoFiles  []string
 	CgoFiles []string
 	CFiles   []string
+	CXXFiles []string
 
 	// Dependency information
 	Imports   []string
