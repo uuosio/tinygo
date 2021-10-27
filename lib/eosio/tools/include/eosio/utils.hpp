@@ -3,6 +3,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/Program.h"
+#include "llvm/Support/ConvertUTF.h"
 #include <stdlib.h>
 #if defined(__APPLE__)
 # include <crt_externs.h>
@@ -120,7 +121,7 @@ struct environment {
          llvm::ArrayRef<char> ref{reinterpret_cast<char const *>(var),
                             len * sizeof(*var)};
          env_storage.emplace_back();
-         auto convStatus = convertUTF16ToUTF8String(ref, env_storage.back());
+         auto convStatus = llvm::convertUTF16ToUTF8String(ref, env_storage.back());
          return env_storage.back();
 #else
          return llvm::StringRef(var);
