@@ -1,3 +1,5 @@
+llvm-build-eosio
+llvm-project-eosio
 lib/eosio/sysroot
 *.bk
 __pycache__

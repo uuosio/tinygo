@@ -1,4 +1,4 @@
-// +build !eosio
+// +build eosio
 // +build gc.leaking
 
 package runtime
@@ -7,6 +7,7 @@ package runtime
 #include <stdlib.h>
 #include <string.h>
 // void *	 memset (void *, int, size_t);
+void * malloc(size_t size);
 */
 import "C"
 
@@ -22,6 +23,7 @@ import (
 var heapptr = heapStart
 
 func alloc(size uintptr) unsafe.Pointer {
+	return unsafe.Pointer(uintptr(C.malloc(C.size_t(size))))
 	// TODO: this can be optimized by not casting between pointers and ints so
 	// much. And by using platform-native data types (e.g. *uint8 for 8-bit
 	// systems).

@@ -525,12 +525,18 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 		job := dummyCompileJob(path)
 		linkerDependencies = append(linkerDependencies, job)
 	case "eosio-libc":
-		path := filepath.Join(root, "lib/eosio/sysroot/lib/libc.a")
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return errors.New("could not find eosio-libc, eosio-libc depends on eosio.cdt")
+		libs := []string{
+			"libc.a",
+			"libeosio_dsm.a",
 		}
-		job := dummyCompileJob(path)
-		linkerDependencies = append(linkerDependencies, job)
+		for _, lib := range libs {
+			path := filepath.Join(root, "lib/eosio/sysroot/lib/"+lib)
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				return errors.New("could not find eosio-libc, eosio-libc depends on eosio.cdt")
+			}
+			job := dummyCompileJob(path)
+			linkerDependencies = append(linkerDependencies, job)
+		}
 	case "":
 		// no library specified, so nothing to do
 	default:

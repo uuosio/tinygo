@@ -13,6 +13,8 @@
 #define GROW_MEMORY(X) __builtin_wasm_memory_grow(0, X)
 #endif
 
+extern "C" unsigned char __heap_base;
+
 namespace eosio {   
    struct dsmalloc {
       inline char* align(char* ptr, uint8_t align_amt) {
@@ -26,8 +28,7 @@ namespace eosio {
       static constexpr uint32_t wasm_page_size = 64*1024;
 
       dsmalloc() {
-         volatile uintptr_t heap_base = 0; // linker places this at address 0
-         heap = align(*(char**)heap_base, 8);
+         heap = align((char*)&__heap_base, 8);
          last_ptr = heap;
 
          next_page = CURRENT_MEMORY;
