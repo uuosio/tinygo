@@ -4,7 +4,9 @@ package builder
 
 import (
 	"errors"
+	"path/filepath"
 	"unsafe"
+	"github.com/tinygo-org/tinygo/goenv"
 )
 
 /*
@@ -25,6 +27,15 @@ const hasBuiltinTools = true
 // linking statically with LLVM (with the byollvm build tag).
 func RunTool(tool string, args ...string) error {
 	args = append([]string{"tinygo:" + tool}, args...)
+	if tool == "clang" {
+		root := goenv.Get("TINYGOROOT")
+		args = append(args, "-I"+filepath.Join(root, "/lib/eosio/sysroot/include"))
+		args = append(args, "-I"+filepath.Join(root, "/lib/eosio/sysroot/include/libc"))
+		args = append(args, "-I"+filepath.Join(root, "/lib/eosio/sysroot/include/libcxx"))
+		args = append(args, "-I"+filepath.Join(root, "/lib/eosio/sysroot/include/eosiolib/capi"))
+		args = append(args, "-I"+filepath.Join(root, "/lib/eosio/sysroot/include/eosiolib/core"))
+		args = append(args, "-I"+filepath.Join(root, "/lib/eosio/sysroot/include/eosiolib/contracts"))
+	}
 
 	var cflag *C.char
 	buf := C.calloc(C.size_t(len(args)), C.size_t(unsafe.Sizeof(cflag)))
