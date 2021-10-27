@@ -186,6 +186,14 @@ lib/wasi-libc-eosio/sysroot/lib/wasm32-wasi/libc.a:
 	@if [ ! -e lib/wasi-libc-eosio/Makefile ]; then echo "Submodules have not been downloaded. Please download them using:\n  git submodule update --init"; exit 1; fi
 	cd lib/wasi-libc-eosio && make -j4 WASM_CC=$(CLANG) WASM_AR=$(LLVM_AR) WASM_NM=$(LLVM_NM)
 
+.PHONY: eosio-libs
+eosio-libs:
+	mkdir -p lib/eosio/build && cd lib/eosio/build && cmake .. -DLLVM_BUILD_DIR=$(TINYGO_SOURCE_DIR)/llvm-build -DCMAKE_C_COMPILER_FORCED=TRUE -DCMAKE_CXX_COMPILER_FORCED=TRUE && make -j4
+	mkdir -p lib/eosio/sysroot/include
+	mkdir -p lib/eosio/sysroot/lib
+	cp -r lib/eosio/build/lib/* lib/eosio/sysroot/lib
+	cp -r lib/eosio/build/include/* lib/eosio/sysroot/include
+
 eosio-go:
 	cd tools/eosio-go;go build -o ../../build/eosio-go$(EXE) eosio-go.go
 
@@ -476,7 +484,7 @@ endif
 wasmtest:
 	$(GO) test ./tests/wasm
 
-build/release: tinygo wasi-libc
+build/release: tinygo wasi-libc wasi-libc-eosio eosio-libs
 	@mkdir -p build/release/tinygo/bin
 	@mkdir -p build/release/tinygo/lib/clang/include
 	@mkdir -p build/release/tinygo/lib/CMSIS/CMSIS
@@ -485,6 +493,7 @@ build/release: tinygo wasi-libc
 	@mkdir -p build/release/tinygo/lib/picolibc/newlib/libc
 	@mkdir -p build/release/tinygo/lib/wasi-libc
 	@mkdir -p build/release/tinygo/lib/wasi-libc-eosio
+	@mkdir -p build/release/tinygo/lib/eosio
 	@mkdir -p build/release/tinygo/lib/eosio-libc/sysroot
 	@mkdir -p build/release/tinygo/pkg/armv6m-none-eabi
 	@mkdir -p build/release/tinygo/pkg/armv7m-none-eabi
@@ -508,10 +517,9 @@ build/release: tinygo wasi-libc
 	@cp -rp lib/picolibc-include         build/release/tinygo/lib
 	@cp -rp lib/wasi-libc/sysroot        build/release/tinygo/lib/wasi-libc/sysroot
 	@cp -rp lib/wasi-libc-eosio/sysroot        build/release/tinygo/lib/wasi-libc-eosio/sysroot
+	@cp -rp lib/eosio/sysroot        build/release/tinygo/lib/eosio/sysroot
 	
 	@echo "eosio libc to build/release/tinygo/lib/eosio-libc/sysroot"
-	@cp -rp ../eosio.cdt/build/include/libc      build/release/tinygo/lib/eosio-libc/sysroot/include
-	@cp -rp ../eosio.cdt/build/lib               build/release/tinygo/lib/eosio-libc/sysroot/lib
 	@cp -rp src                          build/release/tinygo/src
 	@cp -rp targets                      build/release/tinygo/targets
 	./build/tinygo build-library -target=armv6m-none-eabi  -o build/release/tinygo/pkg/armv6m-none-eabi/compiler-rt.a compiler-rt
