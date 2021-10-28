@@ -188,7 +188,7 @@ lib/wasi-libc-eosio/sysroot/lib/wasm32-wasi/libc.a:
 
 .PHONY: eosio-libs
 eosio-libs:
-	mkdir -p lib/eosio/build && cd lib/eosio/build && cmake .. -DLLVM_BUILD_DIR=$(TINYGO_SOURCE_DIR)/llvm-build -DCMAKE_C_COMPILER_FORCED=TRUE -DCMAKE_CXX_COMPILER_FORCED=TRUE && make -j4
+	mkdir -p lib/eosio/build;cd lib/eosio/build;cmake .. -G Ninja -DLLVM_BUILD_DIR=$(TINYGO_SOURCE_DIR)/llvm-build -DCMAKE_C_COMPILER_FORCED=TRUE -DCMAKE_CXX_COMPILER_FORCED=TRUE;ninja
 	mkdir -p lib/eosio/sysroot/include
 	mkdir -p lib/eosio/sysroot/lib
 	cp -r lib/eosio/build/lib/* lib/eosio/sysroot/lib
