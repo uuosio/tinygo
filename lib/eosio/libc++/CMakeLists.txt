@@ -8,7 +8,7 @@ FOREACH(FN ${SRC_FILENAMES})
    LIST(APPEND SRC_FILES "libcxx/src/${FN}")
 ENDFOREACH(FN)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-everything")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-everything  -Wno-unknown-attributes")
 
 add_library(c++
             ${SRC_FILES})
@@ -17,6 +17,7 @@ add_library(c++
 # library.
 
 target_compile_definitions(c++ PRIVATE -D_LIBCPP_BUILDING_LIBRARY)
+
 target_include_directories(c++
                            PUBLIC 
                            ${CMAKE_CURRENT_SOURCE_DIR}/libcxx/include
