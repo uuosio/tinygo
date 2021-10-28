@@ -542,7 +542,6 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	case "eosio-libc":
 		libs := []string{
 			"libc.a",
-			"libeosio_dsm.a",
 		}
 		for _, lib := range libs {
 			path := filepath.Join(root, "lib/eosio/sysroot/lib/"+lib)

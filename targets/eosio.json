@@ -25,7 +25,11 @@
 		"--stack-first",
 		"--export-dynamic",
 		"--no-demangle",
-		"-zstack-size=8192"
+		"-zstack-size=8192",
+		"-L{root}/lib/eosio/sysroot/lib/",
+		"-leosio_dsm",
+		"-lc++",
+		"-leosio"
 	],
 	"emulator":      ["wasmtime"],
 	"wasm-abi":      "generic"
