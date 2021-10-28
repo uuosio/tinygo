@@ -517,7 +517,8 @@ build/release: tinygo wasi-libc wasi-libc-eosio eosio-libs
 	@cp -rp lib/picolibc-include         build/release/tinygo/lib
 	@cp -rp lib/wasi-libc/sysroot        build/release/tinygo/lib/wasi-libc/sysroot
 	@cp -rp lib/wasi-libc-eosio/sysroot        build/release/tinygo/lib/wasi-libc-eosio/sysroot
-	@cp -rp lib/eosio/sysroot        build/release/tinygo/lib/eosio/sysroot
+	@mkdir -p build/release/tinygo/lib/eosio/sysroot
+	@cp -rp lib/eosio/sysroot/*        build/release/tinygo/lib/eosio/sysroot
 	
 	@echo "eosio libc to build/release/tinygo/lib/eosio-libc/sysroot"
 	@cp -rp src                          build/release/tinygo/src
