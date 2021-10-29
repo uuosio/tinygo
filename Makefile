@@ -479,7 +479,7 @@ endif
 ifneq ($(OS),Windows_NT)
 	$(TINYGO) build -o test.elf -gc=leaking -scheduler=none examples/serial
 endif
-
+	$(TINYGO) build -o test examples/callcpp
 
 wasmtest:
 	$(GO) test ./tests/wasm
