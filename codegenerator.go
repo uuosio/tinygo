@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -1737,7 +1738,7 @@ func (t *CodeGenerator) FetchAllGoFiles(dir string) []string {
 		if f.Name() == "generated.go" {
 			continue
 		}
-		goFiles = append(goFiles, f.Name())
+		goFiles = append(goFiles, path.Join(dir, f.Name()))
 	}
 	return goFiles
 }
