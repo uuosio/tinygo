@@ -198,7 +198,7 @@ type Contract struct {
 }
 
 func NewContract(receiver, firstReceiver, action chain.Name) *Contract {
-	return &Contract{}
+	return &Contract{receiver, firstReceiver, action}
 }
 
 //action sayhello
