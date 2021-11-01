@@ -672,6 +672,8 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 		name := v.Name.Name
 		if isContractStruct {
 			t.contractStructName = name
+			//Do not add contract struct to struct list
+			return nil
 		}
 
 		vv, ok := v.Type.(*ast.StructType)
@@ -814,8 +816,6 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 		ignore = true
 	}
 
-	t.actionMap[actionName] = true
-
 	action := ActionInfo{}
 	action.ActionName = actionName
 	action.FuncName = f.Name.Name
@@ -845,6 +845,7 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 		}
 	}
 	t.actions = append(t.actions, action)
+	t.actionMap[actionName] = true
 	return nil
 }
 
