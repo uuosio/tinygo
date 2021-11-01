@@ -32,6 +32,8 @@ func (mi *%[1]sDB) Update(it database.Iterator, v *%[1]s, payer chain.Name) {
 
 const cNewMultiIndexTemplate = `
 func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
+	chain.Check(code != chain.Name{0}, "bad code name")
+	chain.Check(scope != chain.Name{0}, "bad scope name")
 	table := chain.Name{N:uint64(%[2]d)} //table name: %[3]s
 	if table.N&uint64(0x0f) != 0 {
 		// Limit table names to 12 characters so that the last character (4 bits) can be used to distinguish between the secondary indices.
@@ -90,6 +92,8 @@ type %[1]sDB struct {
 }
 
 func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
+	chain.Check(code != chain.Name{0}, "bad code name")
+	chain.Check(scope != chain.Name{0}, "bad scope name")
 	table := chain.Name{N:uint64(%[2]d)}
 	db := database.NewSingletonDB(code, scope, table, %[1]sUnpacker)
 	return &%[1]sDB{db}
