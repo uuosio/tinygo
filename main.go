@@ -1321,6 +1321,7 @@ func main() {
 			genFile("tables.go", 0644, cTables)
 			genFile("structs.go", 0644, cStructs)
 			genFile("test.py", 0644, cTestScript, contractName)
+			genFile("README.md", 0644, cReadMe)
 			genFile("build.sh", 0777, cBuild, contractName)
 			if runtime.GOOS == "windows" {
 				genFile("build.bat", 0777, cBuild, contractName)

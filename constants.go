@@ -335,6 +335,7 @@ try:
 except:
 	print('uuoskit not found, please install it with "pip install uuoskit"')
 	sys.exit(-1)
+from uuoskit.exceptions import ChainException
 
 # modify your test account here
 test_account1 = 'helloworld11'
@@ -350,9 +351,12 @@ with open('%[1]s.abi', 'rb') as f:
 
 try:
     uuosapi.deploy_contract(test_account1, code, abi, vm_type=0)
-except Exception as e:
-    print(e)
+except ChainException as e:
+    if not e.json['error']['details'][0]['message'] == 'contract is already running this version of code':
+        raise e
 
 r = uuosapi.push_action(test_account1, 'sayhello', {'name': 'alice'})
 print(r['processed']['action_traces'][0]['console'])
 `
+
+const cReadMe = "# Building\n\n```bash\neosio-go build -o test.wasm .\n```\n\n# Testing\n```\npython3 test.py\n```"
