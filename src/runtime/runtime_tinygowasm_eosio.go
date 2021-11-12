@@ -1,10 +1,12 @@
-// +build tinygo.wasm, eosio
+//go:build (tinygo.wasm && ignore) || eosio
+// +build tinygo.wasm,ignore eosio
 
 package runtime
 
 /*
 #include <stdint.h>
 void prints_l( const char* cstr, uint32_t len);
+uint64_t  current_time( void );
 */
 import "C"
 
@@ -55,6 +57,14 @@ func putchar(c byte) {
 		//		fd_write(stdout, &putcharIOVec, 1, &putcharNWritten)
 		putcharPosition = 0
 	}
+}
+
+//go:linkname now time.now
+func now() (sec int64, nsec int32, mono int64) {
+	mono = int64(C.current_time()) * 1000
+	sec = mono / (1000 * 1000 * 1000)
+	nsec = int32(mono - sec*(1000*1000*1000))
+	return
 }
 
 // Abort executes the wasm 'unreachable' instruction.
