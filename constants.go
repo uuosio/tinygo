@@ -329,18 +329,18 @@ const cTestScript = `
 import os
 import sys
 try:
-	from uuoskit import uuosapi, wallet
+	from pyeoskit import eosapi, wallet
 except:
-	print('uuoskit not found, please install it with "pip install uuoskit"')
+	print('pyeoskit not found, please install it with "pip install pyeoskit"')
 	sys.exit(-1)
-from uuoskit.exceptions import ChainException
+from pyeoskit.exceptions import ChainException
 
 # modify your test account here
 test_account1 = 'helloworld11'
 # modify your test account private key here
 wallet.import_key('test', '5JRYimgLBrRLCBAcjHUWCYRv3asNedTYYzVgmiU4q2ZVxMBiJXL')
 # modify test node here
-uuosapi.set_node('https://testnode.uuos.network:8443')
+eosapi.set_node('https://testnode.uuos.network:8443')
 
 with open('%[1]s.wasm', 'rb') as f:
     code = f.read()
@@ -348,13 +348,13 @@ with open('%[1]s.abi', 'rb') as f:
     abi = f.read()
 
 try:
-    uuosapi.deploy_contract(test_account1, code, abi, vm_type=0)
+    eosapi.deploy_contract(test_account1, code, abi, vm_type=0)
 except ChainException as e:
     if not e.json['error']['details'][0]['message'] == 'contract is already running this version of code':
         raise e
 
-r = uuosapi.push_action(test_account1, 'sayhello', {'name': 'alice'})
+r = eosapi.push_action(test_account1, 'sayhello', {'name': 'alice'})
 print(r['processed']['action_traces'][0]['console'])
 `
 
-const cReadMe = "# Building\n\n```bash\neosio-go build -o test.wasm .\n```\n\n# Testing\n```\npython3 test.py\n```"
+const cReadMe = "# Building\n\n```bash\neosio-go build -o %[1]s.wasm .\n```\n\n# Testing\n```\npython3 test.py\n```"
