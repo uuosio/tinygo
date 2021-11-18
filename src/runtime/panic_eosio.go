@@ -1,3 +1,4 @@
+//go:build eosio
 // +build eosio
 
 package runtime
@@ -88,6 +89,11 @@ func chanMakePanic() {
 // Panic when a shift value is negative.
 func negativeShiftPanic() {
 	runtimePanic("negative shift")
+}
+
+// Panic when there is a divide by zero.
+func divideByZeroPanic() {
+	runtimePanic("divide by zero")
 }
 
 func blockingPanic() {

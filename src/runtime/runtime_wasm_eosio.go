@@ -30,8 +30,13 @@ func init() {
 	__wasm_call_ctors()
 }
 
+//go:linkname os_runtime_args os.runtime_args
+func os_runtime_args() []string {
+	return []string{}
+}
+
 func Alloc(size uintptr) unsafe.Pointer {
-	return alloc(size)
+	return alloc(size, nil)
 }
 
 func Free(ptr unsafe.Pointer) {

@@ -1,4 +1,5 @@
-// +build !baremetal,!js
+//go:build !baremetal && !js && !eosio
+// +build !baremetal,!js,!eosio
 
 package os
 

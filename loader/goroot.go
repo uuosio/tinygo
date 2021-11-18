@@ -96,7 +96,7 @@ func GetCachedGoroot(config *compileopts.Config) (string, error) {
 			return "", err
 		}
 	}
-	err = mergeDirectory(goroot, tinygoroot, tmpgoroot, "", pathsToOverride(config.BuildTags()))
+	err = mergeDirectory(goroot, tinygoroot, tmpgoroot, "", pathsToOverride(needsSyscallPackage(config.BuildTags())))
 	if err != nil {
 		return "", err
 	}
@@ -206,8 +206,6 @@ func mergeDirectory(goroot, tinygoroot, tmpgoroot, importPath string, overrides 
 
 // needsSyscallPackage returns whether the syscall package should be overriden
 // with the TinyGo version. This is the case on some targets.
-// needsSyscallPackage returns whether the syscall package should be overriden
-// with the TinyGo version. This is the case on some targets.
 func needsSyscallPackage(buildTags []string) bool {
 	for _, tag := range buildTags {
 		if tag == "baremetal" || tag == "darwin" || tag == "nintendoswitch" || tag == "tinygo.wasm" {
@@ -217,18 +215,9 @@ func needsSyscallPackage(buildTags []string) bool {
 	return false
 }
 
-func isEosioTarget(buildTags []string) bool {
-	for _, tag := range buildTags {
-		if tag == "eosio" {
-			return true
-		}
-	}
-	return false
-}
-
 // The boolean indicates whether to merge the subdirs. True means merge, false
 // means use the TinyGo version.
-func pathsToOverride(buildTags []string) map[string]bool {
+func pathsToOverride(needsSyscallPackage bool) map[string]bool {
 	paths := map[string]bool{
 		"/":                     true,
 		"crypto/":               true,
@@ -248,16 +237,9 @@ func pathsToOverride(buildTags []string) map[string]bool {
 		"sync/":                 true,
 		"testing/":              true,
 	}
-
-	needsSyscallPackage := needsSyscallPackage(buildTags)
-
 	if needsSyscallPackage {
 		paths["syscall/"] = true // include syscall/js
 	}
-
-	// if isEosioTarget(buildTags) {
-	// 	paths["log/"] = false
-	// }
 	return paths
 }
 

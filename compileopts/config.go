@@ -272,6 +272,12 @@ func (c *Config) CFlags() []string {
 	case "wasi-libc":
 		root := goenv.Get("TINYGOROOT")
 		cflags = append(cflags, "--sysroot="+root+"/lib/wasi-libc/sysroot")
+	case "wasi-libc-eosio":
+		root := goenv.Get("TINYGOROOT")
+		cflags = append(cflags, "--sysroot="+root+"/lib/wasi-libc-eosio/sysroot")
+	case "eosio-libc":
+		root := goenv.Get("TINYGOROOT")
+		cflags = append(cflags, "--sysroot="+root+"/lib/eosio/sysroot")
 	case "mingw-w64":
 		root := goenv.Get("TINYGOROOT")
 		path, _ := c.LibcPath("mingw-w64")
