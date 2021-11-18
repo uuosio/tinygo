@@ -3,10 +3,11 @@ module github.com/tinygo-org/tinygo
 go 1.15
 
 require (
+	github.com/aykevl/go-wasm v0.0.2-0.20211030161413-11881cb9032d
 	github.com/blakesmith/ar v0.0.0-20150311145944-8bd4349a67f2
 	github.com/chromedp/cdproto v0.0.0-20210113043257-dabd2f2e7693
 	github.com/chromedp/chromedp v0.6.4
-	github.com/fatih/color v1.13.0 // indirect
+	github.com/fatih/color v1.13.0
 	github.com/go-interpreter/wagon v0.6.0
 	github.com/google/shlex v0.0.0-20181106134648-c34317bd91bf
 	github.com/marcinbor85/gohex v0.0.0-20200531091804-343a4b548892

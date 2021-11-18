@@ -239,6 +239,7 @@ func pathsToOverride(buildTags []string) map[string]bool {
 		"internal/bytealg/":     false,
 		"internal/reflectlite/": false,
 		"internal/task/":        false,
+		"internal/itoa/":        false, // TODO: Remove when we drop support for go 1.16
 		"machine/":              false,
 		"net/":                  true,
 		"os/":                   true,

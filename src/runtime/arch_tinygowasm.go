@@ -67,7 +67,7 @@ func growHeap() bool {
 
 //export malloc
 func libc_malloc(size uintptr) unsafe.Pointer {
-	return alloc(size)
+	return alloc(size, nil)
 }
 
 //export free
@@ -80,7 +80,7 @@ func libc_calloc(nmemb, size uintptr) unsafe.Pointer {
 	// Note: we could be even more correct here and check that nmemb * size
 	// doesn't overflow. However the current implementation should normally work
 	// fine.
-	return alloc(nmemb * size)
+	return alloc(nmemb*size, nil)
 }
 
 //export realloc
