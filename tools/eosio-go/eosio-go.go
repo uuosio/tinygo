@@ -30,7 +30,7 @@ func FindTinygo() string {
 
 func main() {
 	tinygo := FindTinygo()
-	args := []string{"build", "-x", "-gc=leaking", "-target", "eosio", "-wasm-abi=generic", "-scheduler=none", "-opt", "z"}
+	args := []string{"build", "-gc=leaking", "-target", "eosio", "-wasm-abi=generic", "-scheduler=none", "-opt", "z"}
 	if len(os.Args) >= 2 && os.Args[1] == "build" {
 		args = append(args, os.Args[2:]...)
 		fmt.Println(tinygo, strings.Join(args, " "))
