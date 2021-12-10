@@ -1143,13 +1143,17 @@ func (t *CodeGenerator) unpackMember(member StructMember) {
 		return
 	}
 	if member.LeadingType == TYPE_SLICE {
-		t.writeCode("{")
-		t.writeCode("    length := dec.UnpackLength()")
-		t.writeCode("    t.%s = make([]%s, length)", member.Name, member.Type)
-		t.writeCode("    for i:=0; i<length; i++ {")
-		t.unpackBaseType(fmt.Sprintf("t.%s[i]", member.Name), member.Type)
-		t.writeCode("    }")
-		t.writeCode("}")
+		if member.Type == "byte" {
+			t.unpackType("UnpackBytes", fmt.Sprintf("t.%s", member.Name))
+		} else {
+			t.writeCode("{")
+			t.writeCode("    length := dec.UnpackLength()")
+			t.writeCode("    t.%s = make([]%s, length)", member.Name, member.Type)
+			t.writeCode("    for i:=0; i<length; i++ {")
+			t.unpackBaseType(fmt.Sprintf("t.%s[i]", member.Name), member.Type)
+			t.writeCode("    }")
+			t.writeCode("}")
+		}
 	} else {
 		t.unpackBaseType("t."+member.Name, member.Type)
 	}
