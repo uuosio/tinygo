@@ -41,7 +41,9 @@ func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
 
 	mi := &database.MultiIndex{}
 	mi.SetTable(code, scope, table)
-	mi.DB = database.NewDBI64(code, scope, table)
+	mi.DB = database.NewDBI64(code, scope, table, func(data []byte) database.DBValue {
+		return mi.Unpack(data)
+	})
 	mi.IdxDBNameToIndex = %[1]sDBNameToIndex
 	mi.IndexTypes = %[1]sSecondaryTypes
 	mi.IDXDBs = make([]database.SecondaryDB, len(%[1]sSecondaryTypes))
