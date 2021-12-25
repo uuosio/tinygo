@@ -18,8 +18,24 @@ type stringHeader struct {
 	len  uintptr
 }
 
+type RevertFunction func(errMsg string)
+
+var gRevertFn RevertFunction
+
+func SetRevertFunction(fn RevertFunction) {
+	gRevertFn = fn
+}
+
+func GetRevertFunction() RevertFunction {
+	return gRevertFn
+}
+
 //Aborts processing of this action and unwinds all pending changes if the test condition is true
 func Assert(test bool, msg string) {
+	if !test && gRevertFn != nil {
+		gRevertFn(msg)
+		return
+	}
 	_test := uint32(0)
 	if test {
 		_test = 1
