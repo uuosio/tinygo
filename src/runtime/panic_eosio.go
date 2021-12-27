@@ -22,11 +22,11 @@ type RevertFunction func(errMsg string)
 
 var gRevertFn RevertFunction
 
-func SetRevertFunction(fn RevertFunction) {
+func SetRevertOnPanicFn(fn RevertFunction) {
 	gRevertFn = fn
 }
 
-func GetRevertFunction() RevertFunction {
+func GetRevertOnPanicFn() RevertFunction {
 	return gRevertFn
 }
 
