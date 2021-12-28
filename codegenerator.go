@@ -1611,6 +1611,7 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 	t.writeCode("    if receiver != firstReceiver {")
 	t.GenNotifyCode()
 	t.writeCode("    }")
+	t.writeCode("chain.Finish()")
 	t.writeCode("}")
 	return nil
 }
