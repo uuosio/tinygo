@@ -508,7 +508,9 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 	case *ast.StarExpr:
 		//Do not parse pointer type in struct
 		if isStructField {
+			color.Set(color.FgYellow)
 			log.Printf("Warning: Pointer type %v in %s ignored\n", field.Names, structName)
+			color.Unset()
 			return nil
 		}
 
@@ -1611,7 +1613,7 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 	t.writeCode("    if receiver != firstReceiver {")
 	t.GenNotifyCode()
 	t.writeCode("    }")
-	t.writeCode("chain.Finish()")
+	t.writeCode("    chain.Finish()")
 	t.writeCode("}")
 	return nil
 }
