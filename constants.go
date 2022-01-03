@@ -17,12 +17,9 @@ func (mi *%[1]sDB) Get(id uint64) (database.Iterator, *%[1]s) {
 	return it, data.(*%[1]s)
 }
 
-func (mi *%[1]sDB) GetByIterator(it database.Iterator) (*%[1]s, error) {
-	data, err := mi.MultiIndexInterface.GetByIterator(it)
-	if err != nil {
-		return nil, err
-	}
-	return data.(*%[1]s), nil
+func (mi *%[1]sDB) GetByIterator(it database.Iterator) *%[1]s {
+	data := mi.MultiIndexInterface.GetByIterator(it)
+	return data.(*%[1]s)
 }
 
 func (mi *%[1]sDB) Update(it database.Iterator, v *%[1]s, payer chain.Name) {
