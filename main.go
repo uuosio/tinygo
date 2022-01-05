@@ -172,12 +172,13 @@ func Build(pkgName, outpath string, options *compileopts.Options) error {
 		return err
 	}
 
-	// fmt.Println("+++++++++config:", config)
-	// fmt.Println("++++", config.Target.BuildTags)
-
 	if IsEosioPlatform(config.Target.BuildTags) {
 		if options.GenCode {
-			if err := GenerateCode(pkgName); err != nil {
+			tags := strings.Split(options.Tags, " ")
+			allTags := make([]string, 0, len(options.Tags)+len(config.Target.BuildTags))
+			allTags = append(allTags, tags...)
+			allTags = append(allTags, config.Target.BuildTags...)
+			if err := GenerateCode(pkgName, allTags); err != nil {
 				return err
 			}
 		}
@@ -1388,7 +1389,11 @@ func main() {
 			usage()
 			os.Exit(1)
 		}
-		err := GenerateCode(pkgName)
+
+		tags := strings.Split(options.Tags, " ")
+		tags = append(tags, "eosio")
+		tags = append(tags, "tinygo.wasm")
+		err := GenerateCode(pkgName, tags)
 		handleCompilerError(err)
 	case "build-library":
 		// Note: this command is only meant to be used while making a release!

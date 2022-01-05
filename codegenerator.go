@@ -878,11 +878,47 @@ func isErrorPackage(pkgName string) bool {
 	return false
 }
 
-func (t *CodeGenerator) ParseGoFile(goFile string) error {
+func (t *CodeGenerator) ParseTags(file *ast.File) map[string]bool {
+	tagMap := make(map[string]bool)
+	for _, comment := range file.Comments {
+		for _, list := range comment.List {
+			if list.Slash < file.Package {
+				prefix := "// +build "
+				if strings.HasPrefix(list.Text, prefix) {
+					tags := strings.TrimPrefix(list.Text, prefix)
+					_tags := strings.Split(tags, ",")
+					for _, tag := range _tags {
+						tagMap[tag] = true
+					}
+				}
+			}
+		}
+	}
+	return tagMap
+}
+
+func (t *CodeGenerator) ParseGoFile(goFile string, tags []string) error {
 	t.currentFile = goFile
 	file, err := parser.ParseFile(t.fset, goFile, nil, parser.ParseComments)
 	if err != nil {
 		return err
+	}
+	tagsMap := t.ParseTags(file)
+	if len(tagsMap) > 0 {
+		found := false
+		for _, tag := range tags {
+			if _, ok := tagsMap[tag]; ok {
+				found = true
+				break
+			}
+			if _, ok := tagsMap["!"+tag]; ok {
+				found = false
+				break
+			}
+		}
+		if !found {
+			return nil
+		}
 	}
 
 	for _, imp := range file.Imports {
@@ -1811,7 +1847,7 @@ func (t *CodeGenerator) Analyse() {
 	}
 }
 
-func GenerateCode(inFile string) error {
+func GenerateCode(inFile string, tags []string) error {
 	// log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
 
@@ -1820,14 +1856,14 @@ func GenerateCode(inFile string) error {
 
 	if filepath.Ext(inFile) == ".go" {
 		gen.dirName = filepath.Dir(inFile)
-		if err := gen.ParseGoFile(inFile); err != nil {
+		if err := gen.ParseGoFile(inFile, tags); err != nil {
 			return err
 		}
 	} else {
 		gen.dirName = inFile
 		goFiles := gen.FetchAllGoFiles(inFile)
 		for _, f := range goFiles {
-			if err := gen.ParseGoFile(f); err != nil {
+			if err := gen.ParseGoFile(f, tags); err != nil {
 				return err
 			}
 		}
