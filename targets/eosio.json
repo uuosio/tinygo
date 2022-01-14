@@ -18,7 +18,8 @@
 		"-I{root}/lib/eosio/sysroot/include/eosiolib/core",
 		"-I{root}/lib/eosio/sysroot/include/eosiolib/contracts",
 		"-std=c++17",
-		"-Wno-unknown-attributes"
+		"-Wno-unknown-attributes",
+		"-fno-exceptions"
 	],
 	"ldflags": [
 		"--allow-undefined",
