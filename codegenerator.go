@@ -710,6 +710,10 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 
 			dbType := indexInfo[0]
 			if dbType == "//primary" {
+				if info.Singleton {
+					errMsg := fmt.Sprintf("Singleton table `%s` can not define primary key explicitly", info.TableName)
+					return t.newError(comment.Pos(), errMsg)
+				}
 				if len(indexInfo) == 2 {
 					primary := indexInfo[1]
 					if primary == "" {
@@ -725,6 +729,10 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 					return t.newError(comment.Pos(), errMsg)
 				}
 			} else if _, ok := t.indexTypeMap[dbType[2:]]; ok {
+				if info.Singleton {
+					errMsg := fmt.Sprintf("Singleton table `%s` can not define secondary key explictly", info.TableName)
+					return t.newError(comment.Pos(), errMsg)
+				}
 				if len(indexInfo) != 4 {
 					errMsg := fmt.Sprintf("Invalid index DB in struct %s: %s", name, indexText)
 					return t.newError(comment.Pos(), errMsg)
@@ -1589,18 +1597,18 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 		}
 }`)
 
-		if table.PrimaryKey != "" {
-			t.writeCode("func (t *%s) GetPrimary() uint64 {", table.StructName)
-			t.writeCode("    return %s", table.PrimaryKey)
-			t.writeCode("}")
-		}
-
 		t.writeCode(cUnpackerCode, table.StructName)
 
 		//generate singleton db code
 		if table.Singleton {
 			t.writeCode(cSingletonCode, table.StructName, StringToName(table.TableName))
 			continue
+		}
+
+		if table.PrimaryKey != "" {
+			t.writeCode("func (t *%s) GetPrimary() uint64 {", table.StructName)
+			t.writeCode("    return %s", table.PrimaryKey)
+			t.writeCode("}")
 		}
 
 		t.writeCode(cDBTemplate, table.StructName, StringToName(table.TableName), table.TableName)
