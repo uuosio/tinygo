@@ -29,13 +29,15 @@ func (mi *%[1]sDB) Update(it database.Iterator, v *%[1]s, payer chain.Name) {
 
 const cNewMultiIndexTemplate = `
 func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
-	chain.Check(code != chain.Name{0}, "bad code name")
 	table := chain.Name{N:uint64(%[2]d)} //table name: %[3]s
 	if table.N&uint64(0x0f) != 0 {
 		// Limit table names to 12 characters so that the last character (4 bits) can be used to distinguish between the secondary indices.
 		panic("NewMultiIndex:Invalid multi-index table name ")
 	}
+	return New%[1]sDBEx(code, scope, table)
+}
 
+func New%[1]sDBEx(code chain.Name, scope chain.Name, table chain.Name) *%[1]sDB {
 	mi := &database.MultiIndex{}
 	mi.SetTable(code, scope, table)
 	mi.DB = database.NewDBI64(code, scope, table, func(data []byte) database.DBValue {

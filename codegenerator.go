@@ -424,7 +424,7 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 			_, ok = field.Type.(*ast.ArrayType)
 			if !ok {
 				errMsg := fmt.Sprintf("ignored action parameter %v not a pointer type", field.Names)
-				return errors.New(errMsg)
+				return t.newError(field.Pos(), errMsg)
 			}
 		}
 	}
