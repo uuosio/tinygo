@@ -268,6 +268,7 @@ type StructInfo struct {
 	PackageName      string
 	TableName        string
 	Singleton        bool
+	IgnoreFromABI    bool
 	StructName       string
 	Comment          string
 	PrimaryKey       string
@@ -288,6 +289,7 @@ type CodeGenerator struct {
 
 	hasMainFunc        bool
 	abiStructsMap      map[string]*StructInfo
+	PackerMap          map[string]*StructInfo
 	actionMap          map[string]bool
 	contractStructName string
 	hasNewContractFunc bool
@@ -336,7 +338,7 @@ func NewCodeGenerator() *CodeGenerator {
 	t := &CodeGenerator{}
 	t.structMap = make(map[string]*StructInfo)
 	t.abiStructsMap = make(map[string]*StructInfo)
-
+	t.PackerMap = make(map[string]*StructInfo)
 	t.actionMap = make(map[string]bool)
 	t.abiTypeMap = make(map[string]bool)
 	t.indexTypeMap = make(map[string]bool)
@@ -639,20 +641,25 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 		if strings.HasPrefix(lastLineDoc, "//table") {
 			//items := Split(lastLineDoc)
 			parts := strings.Fields(lastLineDoc)
-			if len(parts) == 2 && (parts[0] == "//table") {
+			if parts[0] == "//table" && (len(parts) >= 2 && len(parts) <= 4) {
 				tableName := parts[1]
 				if !IsNameValid(tableName) {
 					return t.newError(doc.Pos(), "Invalid table name:"+tableName)
 				}
-				info.TableName = parts[1]
-			} else if (len(parts) == 3) && (parts[0] == "//table") {
-				tableName := parts[1]
-				if !IsNameValid(tableName) {
-					return t.newError(doc.Pos(), "Invalid table name:"+tableName)
-				}
-				info.TableName = parts[1]
-				if parts[2] == "singleton" {
-					info.Singleton = true
+				info.TableName = tableName
+				attrs := parts[2:]
+				for _, attr := range attrs {
+					if attr == "singleton" {
+						if info.Singleton {
+							return t.newError(doc.Pos(), "Duplicate singleton attribute")
+						}
+						info.Singleton = true
+					} else if attr == "ignore" {
+						if info.IgnoreFromABI {
+							return t.newError(doc.Pos(), "Duplicate ingore attribute")
+						}
+						info.IgnoreFromABI = true
+					}
 				}
 			}
 		} else if strings.HasPrefix(lastLineDoc, "//contract") {
@@ -766,7 +773,7 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 		}
 		t.structs = append(t.structs, info)
 		if strings.TrimSpace(lastLineDoc) == "//packer" {
-			t.abiStructsMap[info.StructName] = &t.structs[len(t.structs)-1]
+			t.PackerMap[info.StructName] = &t.structs[len(t.structs)-1]
 		}
 	}
 	return nil
@@ -1527,15 +1534,11 @@ func (t *CodeGenerator) GenCode() error {
 		t.genSizeCode(_struct.StructName, _struct.Members)
 	}
 
-	// for i := range t.structs {
-	// 	_struct := &t.structs[i]
-	// 	if _, ok := t.abiStructsMap[_struct.StructName]; ok {
-	// 		continue
-	// 	}
-	// 	t.genPackCode(_struct.StructName, _struct.Members)
-	// 	t.genUnpackCode(_struct.StructName, _struct.Members)
-	// 	t.genSizeCode(_struct.StructName, _struct.Members)
-	// }
+	for _, _struct := range t.PackerMap {
+		t.genPackCode(_struct.StructName, _struct.Members)
+		t.genUnpackCode(_struct.StructName, _struct.Members)
+		t.genSizeCode(_struct.StructName, _struct.Members)
+	}
 
 	for i := range t.structs {
 		table := &t.structs[i]
@@ -1688,6 +1691,9 @@ func (t *CodeGenerator) GenAbi() error {
 	abi.ErrorMessages = []string{}
 
 	for _, _struct := range t.abiStructsMap {
+		if _struct.IgnoreFromABI {
+			continue
+		}
 		s := ABIStruct{}
 		s.Name = _struct.StructName
 		s.Base = ""
@@ -1728,8 +1734,8 @@ func (t *CodeGenerator) GenAbi() error {
 		abi.Actions = append(abi.Actions, a)
 	}
 
-	for _, table := range t.structs {
-		if table.TableName == "" {
+	for _, table := range t.abiStructsMap {
+		if table.TableName == "" || table.IgnoreFromABI {
 			continue
 		}
 		abiTable := ABITable{}
@@ -1843,15 +1849,12 @@ func (t *CodeGenerator) Analyse() {
 		}
 	}
 
-	for _, item := range t.structs {
+	for i := range t.structs {
+		item := &t.structs[i]
 		if item.TableName == "" {
 			continue
 		}
-
-		item2, ok := t.structMap[item.StructName]
-		if ok {
-			t.addAbiStruct(item2)
-		}
+		t.addAbiStruct(item)
 	}
 }
 
