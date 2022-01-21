@@ -1010,7 +1010,6 @@ func (t *CodeGenerator) genActionCode(notify bool) error {
 		} else {
 			args := "("
 			for i, member := range action.Members {
-				log.Println("+++++gen action code:", member.Name, member.Type)
 				if member.LeadingType == TYPE_POINTER || member.LeadingType == TYPE_SLICE {
 					//args += "&t." + member.Name
 					args += "nil"
