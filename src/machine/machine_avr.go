@@ -1,3 +1,4 @@
+//go:build avr
 // +build avr
 
 package machine
@@ -7,6 +8,8 @@ import (
 	"runtime/volatile"
 	"unsafe"
 )
+
+const deviceName = avr.DEVICE
 
 const (
 	PinInput PinMode = iota
@@ -140,3 +143,9 @@ func (a ADC) Get() uint16 {
 
 	return uint16(avr.ADCL.Get()) | uint16(avr.ADCH.Get())<<8
 }
+
+// linked from runtime.adjustMonotonicTimer
+func adjustMonotonicTimer()
+
+// linked from runtime.initMonotonicTimer
+func initMonotonicTimer()

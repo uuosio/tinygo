@@ -1,4 +1,5 @@
-// +build stm32l5 stm32f7 stm32l4 stm32l0
+//go:build stm32l5 || stm32f7 || stm32l4 || stm32l0 || stm32wlx
+// +build stm32l5 stm32f7 stm32l4 stm32l0 stm32wlx
 
 package machine
 
@@ -27,7 +28,10 @@ const (
 
 const (
 	MAX_NBYTE_SIZE = 255
-	TIMEOUT_TICKS  = 100 // 100ms
+
+	// 100ms delay = 100e6ns / 16ns
+	// In runtime_stm32_timers.go, tick is fixed at 16ns per tick
+	TIMEOUT_TICKS = 100e6 / 16
 
 	I2C_NO_STARTSTOP         = 0x0
 	I2C_GENERATE_START_WRITE = 0x80000000 | stm32.I2C_CR2_START

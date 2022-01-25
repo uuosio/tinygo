@@ -14,6 +14,7 @@ package cgo
 import (
 	"fmt"
 	"go/ast"
+	"go/parser"
 	"go/scanner"
 	"go/token"
 	"path/filepath"
@@ -24,12 +25,6 @@ import (
 	"github.com/google/shlex"
 	"golang.org/x/tools/go/ast/astutil"
 )
-
-// Version of the cgo package. It must be incremented whenever the cgo package
-// is changed in a way that affects the output so that cached package builds
-// will be invalidated.
-// This version is independent of the TinyGo version number.
-const Version = 1 // last change: run libclang once per Go file
 
 // cgoPackage holds all CGo-related information of a package.
 type cgoPackage struct {
@@ -162,6 +157,39 @@ typedef long long           _Cgo_longlong;
 typedef unsigned long long  _Cgo_ulonglong;
 `
 
+// First part of the generated Go file. Written here as Go because that's much
+// easier than constructing the entire AST in memory.
+// The string/bytes functions below implement C.CString etc. To make sure the
+// runtime doesn't need to know the C int type, lengths are converted to uintptr
+// first.
+// These functions will be modified to get a "C." prefix, so the source below
+// doesn't reflect the final AST.
+const generatedGoFilePrefix = `
+import "unsafe"
+
+var _ unsafe.Pointer
+
+//go:linkname C.CString runtime.cgo_CString
+func CString(string) *C.char
+
+//go:linkname C.GoString runtime.cgo_GoString
+func GoString(*C.char) string
+
+//go:linkname C.__GoStringN runtime.cgo_GoStringN
+func __GoStringN(*C.char, uintptr) string
+
+func GoStringN(cstr *C.char, length C.int) string {
+	return C.__GoStringN(cstr, uintptr(length))
+}
+
+//go:linkname C.__GoBytes runtime.cgo_GoBytes
+func __GoBytes(unsafe.Pointer, uintptr) []byte
+
+func GoBytes(ptr unsafe.Pointer, length C.int) []byte {
+	return C.__GoBytes(ptr, uintptr(length))
+}
+`
+
 // Process extracts `import "C"` statements from the AST, parses the comment
 // with libclang, and modifies the AST to use this information. It returns a
 // newly created *ast.File that should be added to the list of to-be-parsed
@@ -202,58 +230,31 @@ func Process(files []*ast.File, dir string, fset *token.FileSet, cflags []string
 	p.packageDir = filepath.Dir(packagePath)
 
 	// Construct a new in-memory AST for CGo declarations of this package.
-	unsafeImport := &ast.ImportSpec{
-		Path: &ast.BasicLit{
-			ValuePos: p.generatedPos,
-			Kind:     token.STRING,
-			Value:    "\"unsafe\"",
-		},
-		EndPos: p.generatedPos,
+	// The first part is written as Go code that is then parsed, but more code
+	// is added later to the AST to declare functions, globals, etc.
+	goCode := "package " + files[0].Name.Name + "\n\n" + generatedGoFilePrefix
+	p.generated, err = parser.ParseFile(fset, dir+"/!cgo.go", goCode, parser.ParseComments)
+	if err != nil {
+		// This is always a bug in the cgo package.
+		panic("unexpected error: " + err.Error())
 	}
-	p.generated = &ast.File{
-		Package: p.generatedPos,
-		Name: &ast.Ident{
-			NamePos: p.generatedPos,
-			Name:    files[0].Name.Name,
-		},
-		Decls: []ast.Decl{
-			// import "unsafe"
-			&ast.GenDecl{
-				TokPos: p.generatedPos,
-				Tok:    token.IMPORT,
-				Specs: []ast.Spec{
-					unsafeImport,
-				},
-			},
-			// var _ unsafe.Pointer
-			// This avoids type errors when the unsafe package is never used.
-			&ast.GenDecl{
-				Tok: token.VAR,
-				Specs: []ast.Spec{
-					&ast.ValueSpec{
-						Names: []*ast.Ident{
-							{
-								Name: "_",
-								Obj: &ast.Object{
-									Kind: ast.Var,
-									Name: "_",
-								},
-							},
-						},
-						Type: &ast.SelectorExpr{
-							X: &ast.Ident{
-								Name: "unsafe",
-							},
-							Sel: &ast.Ident{
-								Name: "Pointer",
-							},
-						},
-					},
-				},
-			},
-		},
-		Imports: []*ast.ImportSpec{unsafeImport},
+	// If the Comments field is not set to nil, the fmt package will get
+	// confused about where comments should go.
+	p.generated.Comments = nil
+	// Adjust some of the functions in there.
+	for _, decl := range p.generated.Decls {
+		switch decl := decl.(type) {
+		case *ast.FuncDecl:
+			switch decl.Name.Name {
+			case "CString", "GoString", "GoStringN", "__GoStringN", "GoBytes", "__GoBytes":
+				// Adjust the name to have a "C." prefix so it is correctly
+				// resolved.
+				decl.Name.Name = "C." + decl.Name.Name
+			}
+		}
 	}
+	// Patch some types, for example *C.char in C.CString.
+	astutil.Apply(p.generated, p.walker, nil)
 
 	// Find all C.* symbols.
 	for _, f := range files {
@@ -496,6 +497,14 @@ func (p *cgoPackage) addFuncDecls() {
 		}
 		args := make([]*ast.Field, len(fn.args))
 		decl := &ast.FuncDecl{
+			Doc: &ast.CommentGroup{
+				List: []*ast.Comment{
+					{
+						Slash: fn.pos - 1,
+						Text:  "//export " + name,
+					},
+				},
+			},
 			Name: &ast.Ident{
 				NamePos: fn.pos,
 				Name:    "C." + name,
@@ -512,14 +521,10 @@ func (p *cgoPackage) addFuncDecls() {
 			},
 		}
 		if fn.variadic {
-			decl.Doc = &ast.CommentGroup{
-				List: []*ast.Comment{
-					{
-						Slash: fn.pos,
-						Text:  "//go:variadic",
-					},
-				},
-			}
+			decl.Doc.List = append(decl.Doc.List, &ast.Comment{
+				Slash: fn.pos - 1,
+				Text:  "//go:variadic",
+			})
 		}
 		obj.Decl = decl
 		for i, arg := range fn.args {
@@ -652,13 +657,21 @@ func (p *cgoPackage) addVarDecls() {
 	}
 	sort.Strings(names)
 	for _, name := range names {
+		global := p.globals[name]
 		gen := &ast.GenDecl{
-			TokPos: token.NoPos,
+			TokPos: global.pos,
 			Tok:    token.VAR,
 			Lparen: token.NoPos,
 			Rparen: token.NoPos,
+			Doc: &ast.CommentGroup{
+				List: []*ast.Comment{
+					{
+						Slash: global.pos - 1,
+						Text:  "//go:extern " + name,
+					},
+				},
+			},
 		}
-		global := p.globals[name]
 		obj := &ast.Object{
 			Kind: ast.Var,
 			Name: "C." + name,

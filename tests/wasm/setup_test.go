@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -18,31 +17,36 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-func run(cmdline string) error {
+func run(t *testing.T, cmdline string) error {
 	args := strings.Fields(cmdline)
-	return runargs(args...)
+	return runargs(t, args...)
 }
 
-func runargs(args ...string) error {
+func runargs(t *testing.T, args ...string) error {
 	cmd := exec.Command(args[0], args[1:]...)
 	b, err := cmd.CombinedOutput()
-	log.Printf("Command: %s; err=%v; full output:\n%s", strings.Join(args, " "), err, b)
+	t.Logf("Command: %s; err=%v; full output:\n%s", strings.Join(args, " "), err, b)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func chromectx(timeout time.Duration) (context.Context, context.CancelFunc) {
-
-	var ctx context.Context
-
+func chromectx(t *testing.T) context.Context {
 	// looks for locally installed Chrome
-	ctx, _ = chromedp.NewContext(context.Background())
+	ctx, ccancel := chromedp.NewContext(context.Background(), chromedp.WithErrorf(t.Errorf), chromedp.WithDebugf(t.Logf), chromedp.WithLogf(t.Logf))
+	t.Cleanup(ccancel)
 
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	// Wait for browser to be ready.
+	err := chromedp.Run(ctx)
+	if err != nil {
+		t.Fatalf("failed to start browser: %s", err.Error())
+	}
 
-	return ctx, cancel
+	ctx, tcancel := context.WithTimeout(ctx, 30*time.Second)
+	t.Cleanup(tcancel)
+
+	return ctx
 }
 
 func startServer(t *testing.T) (string, *httptest.Server) {

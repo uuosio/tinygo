@@ -2,6 +2,10 @@
 
 package syscall
 
+import (
+	"unsafe"
+)
+
 // This file defines errno and constants to match the darwin libsystem ABI.
 // Values have been copied from src/syscall/zerrors_darwin_amd64.go.
 
@@ -36,18 +40,20 @@ func (e Errno) Is(target error) bool {
 	return false
 }
 
+// Source: https://opensource.apple.com/source/xnu/xnu-7195.81.3/bsd/sys/errno.h.auto.html
 const (
-	EPERM       Errno = 0x1
-	ENOENT      Errno = 0x2
-	EACCES      Errno = 0xd
-	EEXIST      Errno = 0x11
-	EINTR       Errno = 0x4
-	ENOTDIR     Errno = 0x14
-	EINVAL      Errno = 0x16
-	EMFILE      Errno = 0x18
-	EAGAIN      Errno = 0x23
-	ETIMEDOUT   Errno = 0x3c
-	ENOSYS      Errno = 0x4e
+	EPERM       Errno = 1
+	ENOENT      Errno = 2
+	EACCES      Errno = 13
+	EEXIST      Errno = 17
+	EINTR       Errno = 4
+	ENOTDIR     Errno = 20
+	EINVAL      Errno = 22
+	EMFILE      Errno = 24
+	EPIPE       Errno = 32
+	EAGAIN      Errno = 35
+	ETIMEDOUT   Errno = 60
+	ENOSYS      Errno = 78
 	EWOULDBLOCK Errno = EAGAIN
 )
 
@@ -77,4 +83,124 @@ const (
 	O_CREAT  = 0x200
 	O_TRUNC  = 0x400
 	O_EXCL   = 0x800
+
+	O_CLOEXEC = 0x01000000
 )
+
+// Source: https://opensource.apple.com/source/xnu/xnu-7195.81.3/bsd/sys/mman.h.auto.html
+const (
+	PROT_NONE  = 0x00 // no permissions
+	PROT_READ  = 0x01 // pages can be read
+	PROT_WRITE = 0x02 // pages can be written
+	PROT_EXEC  = 0x04 // pages can be executed
+
+	MAP_SHARED  = 0x0001 // share changes
+	MAP_PRIVATE = 0x0002 // changes are private
+
+	MAP_FILE      = 0x0000 // map from file (default)
+	MAP_ANON      = 0x1000 // allocated from memory, swap space
+	MAP_ANONYMOUS = MAP_ANON
+)
+
+type Timespec struct {
+	Sec  int64
+	Nsec int64
+}
+
+// Go chose Linux's field names for Stat_t, see https://github.com/golang/go/issues/31735
+type Stat_t struct {
+	Dev       int32
+	Mode      uint16
+	Nlink     uint16
+	Ino       uint64
+	Uid       uint32
+	Gid       uint32
+	Rdev      int32
+	Pad_cgo_0 [4]byte
+	Atim      Timespec
+	Mtim      Timespec
+	Ctim      Timespec
+	Btim      Timespec
+	Size      int64
+	Blocks    int64
+	Blksize   int32
+	Flags     uint32
+	Gen       uint32
+	Lspare    int32
+	Qspare    [2]int64
+}
+
+// Source: https://github.com/apple/darwin-xnu/blob/main/bsd/sys/_types/_s_ifmt.h
+const (
+	S_IEXEC  = 0x40
+	S_IFBLK  = 0x6000
+	S_IFCHR  = 0x2000
+	S_IFDIR  = 0x4000
+	S_IFIFO  = 0x1000
+	S_IFLNK  = 0xa000
+	S_IFMT   = 0xf000
+	S_IFREG  = 0x8000
+	S_IFSOCK = 0xc000
+	S_IFWHT  = 0xe000
+	S_IREAD  = 0x100
+	S_IRGRP  = 0x20
+	S_IROTH  = 0x4
+	S_IRUSR  = 0x100
+	S_IRWXG  = 0x38
+	S_IRWXO  = 0x7
+	S_IRWXU  = 0x1c0
+	S_ISGID  = 0x400
+	S_ISTXT  = 0x200
+	S_ISUID  = 0x800
+	S_ISVTX  = 0x200
+	S_IWGRP  = 0x10
+	S_IWOTH  = 0x2
+	S_IWRITE = 0x80
+	S_IWUSR  = 0x80
+	S_IXGRP  = 0x8
+	S_IXOTH  = 0x1
+	S_IXUSR  = 0x40
+)
+
+func Stat(path string, p *Stat_t) (err error) {
+	data := cstring(path)
+	n := libc_stat(&data[0], unsafe.Pointer(p))
+
+	if n < 0 {
+		err = getErrno()
+	}
+	return
+}
+
+func Fstat(fd int, p *Stat_t) (err error) {
+	n := libc_fstat(int32(fd), unsafe.Pointer(p))
+
+	if n < 0 {
+		err = getErrno()
+	}
+	return
+}
+
+func Lstat(path string, p *Stat_t) (err error) {
+	data := cstring(path)
+	n := libc_lstat(&data[0], unsafe.Pointer(p))
+	if n < 0 {
+		err = getErrno()
+	}
+	return
+}
+
+// The odd $INODE64 suffix is an Apple compatibility feature, see https://assert.cc/posts/darwin_use_64_bit_inode_vs_ctypes/
+// Without it, you get the old, smaller struct stat from mac os 10.2 or so.
+
+// int stat(const char *path, struct stat * buf);
+//export stat$INODE64
+func libc_stat(pathname *byte, ptr unsafe.Pointer) int32
+
+// int fstat(int fd, struct stat * buf);
+//export fstat$INODE64
+func libc_fstat(fd int32, ptr unsafe.Pointer) int32
+
+// int lstat(const char *path, struct stat * buf);
+//export lstat$INODE64
+func libc_lstat(pathname *byte, ptr unsafe.Pointer) int32

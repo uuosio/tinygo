@@ -12,9 +12,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/tinygo-org/tinygo/goenv"
+	"tinygo.org/x/go-llvm"
 )
 
 // Target specification for a given target. Used for bare metal targets.
@@ -257,13 +259,14 @@ func defaultTarget(goos, goarch, triple string) (*TargetSpec, error) {
 		spec.Features = "+cx8,+fxsr,+mmx,+sse,+sse2,+x87"
 	case "arm":
 		spec.CPU = "generic"
+		spec.CFlags = append(spec.CFlags, "-fno-unwind-tables")
 		switch strings.Split(triple, "-")[0] {
 		case "armv5":
-			spec.Features = "+armv5t,+strict-align,-thumb-mode"
+			spec.Features = "+armv5t,+strict-align,-aes,-bf16,-d32,-dotprod,-fp-armv8,-fp-armv8d16,-fp-armv8d16sp,-fp-armv8sp,-fp16,-fp16fml,-fp64,-fpregs,-fullfp16,-mve.fp,-neon,-sha2,-thumb-mode,-vfp2,-vfp2sp,-vfp3,-vfp3d16,-vfp3d16sp,-vfp3sp,-vfp4,-vfp4d16,-vfp4d16sp,-vfp4sp"
 		case "armv6":
-			spec.Features = "+armv6,+dsp,+fp64,+strict-align,+vfp2,+vfp2sp,-thumb-mode"
+			spec.Features = "+armv6,+dsp,+fp64,+strict-align,+vfp2,+vfp2sp,-aes,-d32,-fp-armv8,-fp-armv8d16,-fp-armv8d16sp,-fp-armv8sp,-fp16,-fp16fml,-fullfp16,-neon,-sha2,-thumb-mode,-vfp3,-vfp3d16,-vfp3d16sp,-vfp3sp,-vfp4,-vfp4d16,-vfp4d16sp,-vfp4sp"
 		case "armv7":
-			spec.Features = "+armv7-a,+dsp,+fp64,+vfp2,+vfp2sp,+vfp3d16,+vfp3d16sp,-thumb-mode"
+			spec.Features = "+armv7-a,+d32,+dsp,+fp64,+neon,+vfp2,+vfp2sp,+vfp3,+vfp3d16,+vfp3d16sp,+vfp3sp,-aes,-fp-armv8,-fp-armv8d16,-fp-armv8d16sp,-fp-armv8sp,-fp16,-fp16fml,-fullfp16,-sha2,-thumb-mode,-vfp4,-vfp4d16,-vfp4d16sp,-vfp4sp"
 		}
 	case "arm64":
 		spec.CPU = "generic"
@@ -280,6 +283,12 @@ func defaultTarget(goos, goarch, triple string) (*TargetSpec, error) {
 	} else if goos == "windows" {
 		spec.Linker = "ld.lld"
 		spec.Libc = "mingw-w64"
+		// Note: using a medium code model, low image base and no ASLR
+		// because Go doesn't really need those features. ASLR patches
+		// around issues for unsafe languages like C/C++ that are not
+		// normally present in Go (without explicitly opting in).
+		// For more discussion:
+		// https://groups.google.com/g/Golang-nuts/c/Jd9tlNc6jUE/m/Zo-7zIP_m3MJ?pli=1
 		spec.LDFlags = append(spec.LDFlags,
 			"-m", "i386pep",
 			"-Bdynamic",
@@ -287,6 +296,12 @@ func defaultTarget(goos, goarch, triple string) (*TargetSpec, error) {
 			"--gc-sections",
 			"--no-insert-timestamp",
 		)
+		llvmMajor, _ := strconv.Atoi(strings.Split(llvm.Version, ".")[0])
+		if llvmMajor >= 12 {
+			// This flag was added in LLVM 12. At the same time, LLVM 12
+			// switched the default from --dynamicbase to --no-dynamicbase.
+			spec.LDFlags = append(spec.LDFlags, "--no-dynamicbase")
+		}
 	} else {
 		spec.LDFlags = append(spec.LDFlags, "-no-pie", "-Wl,--gc-sections") // WARNING: clang < 5.0 requires -nopie
 	}

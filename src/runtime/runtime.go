@@ -4,6 +4,8 @@ import (
 	"unsafe"
 )
 
+//go:generate go run ../../tools/gen-critical-atomics -out ./atomics_critical.go
+
 const Compiler = "tinygo"
 
 // The compiler will fill this with calls to the initialization function of each
@@ -39,8 +41,17 @@ func memmove(dst, src unsafe.Pointer, size uintptr)
 // llvm.memset.p0i8.i32(ptr, 0, size, false).
 func memzero(ptr unsafe.Pointer, size uintptr)
 
+// This intrinsic returns the current stack pointer.
+// It is normally used together with llvm.stackrestore but also works to get the
+// current stack pointer in a platform-independent way.
+//export llvm.stacksave
+func stacksave() unsafe.Pointer
+
 //export strlen
 func strlen(ptr unsafe.Pointer) uintptr
+
+//export malloc
+func malloc(size uintptr) unsafe.Pointer
 
 // Compare two same-size buffers for equality.
 func memequal(x, y unsafe.Pointer, n uintptr) bool {

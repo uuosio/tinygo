@@ -2,6 +2,10 @@
 
 package machine
 
+import "device/stm32"
+
+const deviceName = stm32.Device
+
 // Peripheral abstraction layer for the stm32.
 
 const (
@@ -15,6 +19,7 @@ const (
 	portH
 	portI
 	portJ
+	portK
 )
 
 // Peripheral operations sequence:

@@ -41,6 +41,13 @@ func TestCompiler(t *testing.T) {
 		t.Skip("compiler tests require LLVM 11 or above, got LLVM ", llvm.Version)
 	}
 
+	// Determine Go minor version (e.g. 16 in go1.16.3).
+	_, goMinor, err := goenv.GetGorootVersion(goenv.Get("GOROOT"))
+	if err != nil {
+		t.Fatal("could not read Go version:", err)
+	}
+
+	// Determine which tests to run, depending on the Go and LLVM versions.
 	tests := []testCase{
 		{"basic.go", "", ""},
 		{"pointer.go", "", ""},
@@ -48,22 +55,20 @@ func TestCompiler(t *testing.T) {
 		{"string.go", "", ""},
 		{"float.go", "", ""},
 		{"interface.go", "", ""},
-		{"func.go", "", "coroutines"},
+		{"func.go", "", ""},
 		{"pragma.go", "", ""},
 		{"goroutine.go", "wasm", "asyncify"},
-		{"goroutine.go", "wasm", "coroutines"},
 		{"goroutine.go", "cortex-m-qemu", "tasks"},
 		{"channel.go", "", ""},
 		{"intrinsics.go", "cortex-m-qemu", ""},
 		{"intrinsics.go", "wasm", ""},
 		{"gc.go", "", ""},
 	}
-
-	_, minor, err := goenv.GetGorootVersion(goenv.Get("GOROOT"))
-	if err != nil {
-		t.Fatal("could not read Go version:", err)
+	if llvmMajor >= 12 {
+		tests = append(tests, testCase{"intrinsics.go", "cortex-m-qemu", ""})
+		tests = append(tests, testCase{"intrinsics.go", "wasm", ""})
 	}
-	if minor >= 17 {
+	if goMinor >= 17 {
 		tests = append(tests, testCase{"go1.17.go", "", ""})
 	}
 
@@ -100,9 +105,9 @@ func TestCompiler(t *testing.T) {
 				CodeModel:          config.CodeModel(),
 				RelocationModel:    config.RelocationModel(),
 				Scheduler:          config.Scheduler(),
-				FuncImplementation: config.FuncImplementation(),
 				AutomaticStackSize: config.AutomaticStackSize(),
 				DefaultStackSize:   config.Target.DefaultStackSize,
+				NeedsStackObjects:  config.NeedsStackObjects(),
 			}
 			machine, err := NewTargetMachine(compilerConfig)
 			if err != nil {
@@ -201,6 +206,12 @@ func fuzzyEqualIR(s1, s2 string) bool {
 // stripped out.
 func filterIrrelevantIRLines(lines []string) []string {
 	var out []string
+	llvmVersion, err := strconv.Atoi(strings.Split(llvm.Version, ".")[0])
+	if err != nil {
+		// Note: this should never happen and if it does, it will always happen
+		// for a particular build because llvm.Version is a constant.
+		panic(err)
+	}
 	for _, line := range lines {
 		line = strings.Split(line, ";")[0]    // strip out comments/info
 		line = strings.TrimRight(line, "\r ") // drop '\r' on Windows and remove trailing spaces from comments
@@ -208,6 +219,16 @@ func filterIrrelevantIRLines(lines []string) []string {
 			continue
 		}
 		if strings.HasPrefix(line, "source_filename = ") {
+			continue
+		}
+		if llvmVersion < 12 && strings.HasPrefix(line, "attributes ") {
+			// Ignore attribute groups. These may change between LLVM versions.
+			// Right now test outputs are for LLVM 12 and higher.
+			continue
+		}
+		if llvmVersion < 13 && strings.HasPrefix(line, "target datalayout = ") {
+			// The datalayout string may vary betewen LLVM versions.
+			// Right now test outputs are for LLVM 13 and higher.
 			continue
 		}
 		out = append(out, line)

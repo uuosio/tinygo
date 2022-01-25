@@ -116,8 +116,9 @@ func filterIrrelevantIRLines(lines []string) []string {
 		if strings.HasPrefix(line, "source_filename = ") {
 			continue
 		}
-		if llvmVersion < 11 && strings.HasPrefix(line, "attributes ") {
+		if llvmVersion < 12 && strings.HasPrefix(line, "attributes ") {
 			// Ignore attribute groups. These may change between LLVM versions.
+			// Right now test outputs are for LLVM 12.
 			continue
 		}
 		out = append(out, line)
@@ -145,7 +146,6 @@ func compileGoFileForTesting(t *testing.T, filename string) llvm.Module {
 		CodeModel:          config.CodeModel(),
 		RelocationModel:    config.RelocationModel(),
 		Scheduler:          config.Scheduler(),
-		FuncImplementation: config.FuncImplementation(),
 		AutomaticStackSize: config.AutomaticStackSize(),
 		Debug:              true,
 	}
