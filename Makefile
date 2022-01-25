@@ -621,7 +621,7 @@ ifneq ($(USE_SYSTEM_BINARYEN),1)
 endif
 	@cp -p  build/eosio-strip$(EXE)       build/release/tinygo/bin
 	@cp -p  build/eosio-go$(EXE)      build/release/tinygo/bin
-	@mkdir -p build/release/tinygo/lib/wasi-libc-eosio
+#	@mkdir -p build/release/tinygo/lib/wasi-libc-eosio
 	@mkdir -p build/release/tinygo/lib/eosio
 	@mkdir -p build/release/tinygo/lib/eosio-libc/sysroot
 	@cp -p $(abspath $(CLANG_SRC))/lib/Headers/*.h build/release/tinygo/lib/clang/include
@@ -665,7 +665,7 @@ endif
 	@cp -rp lib/picolibc/newlib/libm/common      build/release/tinygo/lib/picolibc/newlib/libm
 	@cp -rp lib/picolibc-stdio.c         build/release/tinygo/lib
 	@cp -rp lib/wasi-libc/sysroot        build/release/tinygo/lib/wasi-libc/sysroot
-	@cp -rp lib/wasi-libc-eosio/sysroot        build/release/tinygo/lib/wasi-libc-eosio/sysroot
+#	@cp -rp lib/wasi-libc-eosio/sysroot        build/release/tinygo/lib/wasi-libc-eosio/sysroot
 	@mkdir -p build/release/tinygo/lib/eosio/sysroot
 	@cp -rp lib/eosio/sysroot/*        build/release/tinygo/lib/eosio/sysroot
 	
