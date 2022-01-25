@@ -597,7 +597,7 @@ endif
 wasmtest:
 	$(GO) test ./tests/wasm
 
-build/release: tinygo wasi-libc binaryen wasi-libc-eosio eosio-libs
+build/release: tinygo wasi-libc eosio-libs
 	@mkdir -p build/release/tinygo/bin
 	@mkdir -p build/release/tinygo/lib/clang/include
 	@mkdir -p build/release/tinygo/lib/CMSIS/CMSIS
