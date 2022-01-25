@@ -7,10 +7,13 @@ require (
 	github.com/blakesmith/ar v0.0.0-20150311145944-8bd4349a67f2
 	github.com/chromedp/cdproto v0.0.0-20220113222801-0725d94bb6ee
 	github.com/chromedp/chromedp v0.7.6
+	github.com/fatih/color v1.13.0
+	github.com/go-interpreter/wagon v0.6.0
 	github.com/gofrs/flock v0.8.1
 	github.com/google/shlex v0.0.0-20181106134648-c34317bd91bf
 	github.com/marcinbor85/gohex v0.0.0-20200531091804-343a4b548892
-	github.com/mattn/go-colorable v0.1.8
+	github.com/mattn/go-colorable v0.1.9
+	github.com/uuosio/chain v0.1.8
 	go.bug.st/serial v1.1.3
 	golang.org/x/sys v0.0.0-20220114195835-da31bd327af9
 	golang.org/x/tools v0.1.6-0.20210813165731-45389f592fe9

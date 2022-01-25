@@ -1425,7 +1425,7 @@ func main() {
 		handleCompilerError(err)
 	case "init":
 		if flag.NArg() != 1 {
-			usage()
+			usage("init")
 			os.Exit(1)
 		}
 
@@ -1461,7 +1461,7 @@ func main() {
 			pkgName = filepath.ToSlash(flag.Arg(0))
 		} else if flag.NArg() > 1 {
 			fmt.Fprintln(os.Stderr, "gencode only accepts a single positional argument: package name, but multiple were specified")
-			usage()
+			usage("gencode")
 			os.Exit(1)
 		}
 
