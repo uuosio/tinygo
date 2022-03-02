@@ -1,59 +1,62 @@
 package main
 
 const cDBTemplate = `
-type %[1]sDB struct {
+type {{.StructName}}DB struct {
 	database.MultiIndexInterface
 }
 
-func (mi *%[1]sDB) Store(v *%[1]s, payer chain.Name) {
+func (mi *{{.StructName}}DB) Store(v *{{.StructName}}, payer chain.Name) {
 	mi.MultiIndexInterface.Store(v, payer)
 }
 
-func (mi *%[1]sDB) Get(id uint64) (database.Iterator, *%[1]s) {
+func (mi *{{.StructName}}DB) Get(id uint64) (database.Iterator, *{{.StructName}}) {
 	it, data := mi.MultiIndexInterface.Get(id)
 	if !it.IsOk() {
 		return it, nil
 	}
-	return it, data.(*%[1]s)
+	return it, data.(*{{.StructName}})
 }
 
-func (mi *%[1]sDB) GetByIterator(it database.Iterator) *%[1]s {
+func (mi *{{.StructName}}DB) GetByIterator(it database.Iterator) *{{.StructName}} {
 	data := mi.MultiIndexInterface.GetByIterator(it)
-	return data.(*%[1]s)
+	return data.(*{{.StructName}})
 }
 
-func (mi *%[1]sDB) Update(it database.Iterator, v *%[1]s, payer chain.Name) {
+func (mi *{{.StructName}}DB) Update(it database.Iterator, v *{{.StructName}}, payer chain.Name) {
 	mi.MultiIndexInterface.Update(it, v, payer)
 }
 `
 
 const cNewMultiIndexTemplate = `
-func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
-	table := chain.Name{N:uint64(%[2]d)} //table name: %[3]s
+func New{{.Name}}DB(code chain.Name, scope chain.Name) *{{.Name}}DB {
+	table := chain.Name{N:uint64({{.TableName}})} //table name: {{.Name}}
 	if table.N&uint64(0x0f) != 0 {
 		// Limit table names to 12 characters so that the last character (4 bits) can be used to distinguish between the secondary indices.
 		panic("NewMultiIndex:Invalid multi-index table name ")
 	}
-	return New%[1]sDBEx(code, scope, table)
-}
 
-func New%[1]sDBEx(code chain.Name, scope chain.Name, table chain.Name) *%[1]sDB {
 	mi := &database.MultiIndex{}
 	mi.SetTable(code, scope, table)
 	mi.DB = database.NewDBI64(code, scope, table, func(data []byte) database.DBValue {
 		return mi.Unpack(data)
 	})
-	mi.IdxDBNameToIndex = %[1]sDBNameToIndex
-	mi.IndexTypes = %[1]sSecondaryTypes
-	mi.IDXDBs = make([]database.SecondaryDB, len(%[1]sSecondaryTypes))
-	mi.Unpack = %[1]sUnpacker
-`
+	mi.IdxDBNameToIndex = {{.Name}}DBNameToIndex
+	mi.IndexTypes = {{.Name}}SecondaryTypes
+	mi.IDXDBs = make([]database.SecondaryDB, len({{.Name}}SecondaryTypes))
+	mi.Unpack = {{.Name}}Unpacker
 
-const cGetDBTemplate = `
-func (mi *%[1]sDB) GetIdxDB%[2]s() *database.%[4]sI {
-	secondaryDB := mi.GetIdxDBByIndex(%[3]d)
-	return &database.%[4]sI{secondaryDB}
+{{- range $i, $val := .Indexes}}
+	mi.IDXDBs[{{$i}}] = database.New{{$val.DBType}}({{$i}}, code.N, scope.N, uint64({{$.FirstIdxTableName}})+{{$i}})
+{{- end}}
+	return &{{.Name}}DB{mi}
 }
+
+{{- range $i, $val := .Indexes}}
+func (mi *{{$.Name}}DB) GetIdxDB{{$val.Name}}() *database.{{$val.DBType}}I {
+	secondaryDB := mi.GetIdxDBByIndex({{$i}})
+	return &database.{{$val.DBType}}I{secondaryDB}
+}
+{{- end}}
 `
 
 const cDummyCode = `
@@ -83,44 +86,37 @@ func main() {
 `
 
 const cSingletonCode = `
-func (d *%[1]s) GetPrimary() uint64 {
-	return uint64(%[2]d)
+func (d *{{.Name}}) GetPrimary() uint64 {
+	return uint64({{.TableName}})
 }
 
-type %[1]sDB struct {
+type {{.Name}}DB struct {
 	db *database.SingletonDB
 }
 
-func New%[1]sDB(code chain.Name, scope chain.Name) *%[1]sDB {
+func New{{.Name}}DB(code chain.Name, scope chain.Name) *{{.Name}}DB {
 	chain.Check(code != chain.Name{0}, "bad code name")
-	table := chain.Name{N:uint64(%[2]d)}
-	db := database.NewSingletonDB(code, scope, table, %[1]sUnpacker)
-	return &%[1]sDB{db}
+	table := chain.Name{N:uint64({{.TableName}})}
+	db := database.NewSingletonDB(code, scope, table, {{.Name}}Unpacker)
+	return &{{.Name}}DB{db}
 }
 
-func (t *%[1]sDB) Set(data *%[1]s, payer chain.Name) {
+func (t *{{.Name}}DB) Set(data *{{.Name}}, payer chain.Name) {
 	t.db.Set(data, payer)
 }
 
-func (t *%[1]sDB) Get() (*%[1]s) {
+func (t *{{.Name}}DB) Get() (*{{.Name}}) {
 	data := t.db.Get()
 	if data == nil {
 		return nil
 	}
-	return data.(*%[1]s)
+	return data.(*{{.Name}})
 }
 
-func (t *%[1]sDB) Remove() {
+func (t *{{.Name}}DB) Remove() {
 	t.db.Remove()
 }
 `
-
-const cUnpackerCode = `
-func %[1]sUnpacker(buf []byte) database.MultiIndexValue {
-	v := &%[1]s{}
-	v.Unpack(buf)
-	return v
-}`
 
 const cImportCode = `package main
 import (
@@ -359,3 +355,52 @@ print(r['processed']['action_traces'][0]['console'])
 `
 
 const cReadMe = "# Building\n\n```bash\neosio-go build -o %[1]s.wasm .\n```\n\n# Testing\n```\npython3 test.py\n```"
+
+const cStructTemplate = `
+var (
+	{{.StructName}}SecondaryTypes = []int{
+	{{- range $i, $val := .SecondaryIndexes}}
+		database.{{$val.Type}},
+	{{- end}}
+	}
+)
+
+func {{.StructName}}DBNameToIndex(indexName string) int {
+	switch indexName {
+	{{- range $i, $val := .SecondaryIndexes}}
+		case "{{$val.Name}}":
+			return {{$i}}
+	{{- end}}
+	default:
+		panic("unknow indexName")
+	}
+}
+
+func {{.StructName}}Unpacker(buf []byte) database.MultiIndexValue {
+	v := &{{.StructName}}{}
+	v.Unpack(buf)
+	return v
+}
+
+func (t *{{.StructName}}) GetSecondaryValue(index int) interface{} {
+	switch index {
+	{{- range $i, $val := .SecondaryIndexes}}
+		case {{$i}}:
+			return {{$val.Getter}}
+	{{- end}}
+		default:
+			panic("index out of bound")
+	}
+}
+
+func (t *{{.StructName}}) SetSecondaryValue(index int, v interface{}) {
+	switch index {
+		{{- range $i, $val := .SecondaryIndexes}}
+	case {{$i}}:
+		{{$val.GetSetter}}
+{{- end}}
+	default:
+		panic("unknown index")
+	}
+}
+`

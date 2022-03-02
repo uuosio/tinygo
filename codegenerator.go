@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"text/template"
 
 	"github.com/fatih/color"
 )
@@ -246,9 +247,19 @@ type ActionInfo struct {
 
 type SecondaryIndexInfo struct {
 	Type   string
+	DBType string
 	Name   string
 	Getter string
 	Setter string
+}
+
+func (t SecondaryIndexInfo) GetSetter() string {
+	value := fmt.Sprintf("v.(%s)", GetIndexType(t.Type))
+	if strings.Index(t.Setter, "%v") >= 0 {
+		return fmt.Sprintf(t.Setter, value)
+	} else {
+		return fmt.Sprintf("%s=%s", t.Setter, value)
+	}
 }
 
 const (
@@ -256,6 +267,19 @@ const (
 	BinaryExtensionType
 	OptionalType
 )
+
+type TableTemplate struct {
+	Name              string
+	TableName         uint64
+	FirstIdxTableName uint64
+	Indexes           []SecondaryIndexInfo
+}
+
+func NewTableTemplate(name string, tableName string, indexes []SecondaryIndexInfo) *TableTemplate {
+	nTableName := StringToName(tableName)
+	idxName := nTableName & uint64(0xfffffffffffffff0)
+	return &TableTemplate{name, nTableName, idxName, indexes}
+}
 
 //handle binary_extension and optional abi types
 type SpecialAbiType struct {
@@ -267,6 +291,7 @@ type SpecialAbiType struct {
 type StructInfo struct {
 	PackageName      string
 	TableName        string
+	RawTableName     uint64
 	Singleton        bool
 	IgnoreFromABI    bool
 	StructName       string
@@ -647,6 +672,7 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 					return t.newError(doc.Pos(), "Invalid table name:"+tableName)
 				}
 				info.TableName = tableName
+				info.RawTableName = StringToName(tableName)
 				attrs := parts[2:]
 				for _, attr := range attrs {
 					if attr == "singleton" {
@@ -767,7 +793,9 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				if setter == "" {
 					return t.newError(comment.Pos(), "Invalid setter in: "+indexText)
 				}
-				indexInfo := SecondaryIndexInfo{idx, name, getter, setter}
+
+				dbType := indexTypeToSecondaryDBName(idx)
+				indexInfo := SecondaryIndexInfo{idx, dbType, name, getter, setter}
 				info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
 			}
 		}
@@ -981,6 +1009,11 @@ func (t *CodeGenerator) writeCode(format string, a ...interface{}) {
 	if format == "}" { //end of function
 		fmt.Fprintf(t.codeFile, "\n")
 	}
+}
+
+func (gen *CodeGenerator) writeCodeEx(temp string, s interface{}) error {
+	t := template.Must(template.New("temp").Parse(temp))
+	return t.Execute(gen.codeFile, s)
 }
 
 func (t *CodeGenerator) genActionCode(notify bool) error {
@@ -1545,65 +1578,13 @@ func (t *CodeGenerator) GenCode() error {
 			continue
 		}
 
-		t.writeCode(`
-func %sDBNameToIndex(indexName string) int {
-	switch indexName {`, table.StructName)
-
-		for i, index := range table.SecondaryIndexes {
-			if index.Name != "" {
-				t.writeCode(`	case "%s":`, index.Name)
-				t.writeCode(`	    return %d`, i)
-			}
-		}
-
-		t.writeCode(`	default:
-		panic("unknow indexName")
-	}
-}`)
-
-		t.writeCode("var (\n	%sSecondaryTypes = []int{", table.StructName)
-		for _, index := range table.SecondaryIndexes {
-			t.writeCode("        database.%s,", index.Type)
-		}
-		t.writeCode("})")
-
-		t.writeCode(`
-func (t *%s) GetSecondaryValue(index int) interface{} {
-	switch index {`, table.StructName)
-
-		for i, index := range table.SecondaryIndexes {
-			t.writeCode(`    case %d:
-		return %s`, i, index.Getter)
-
-		}
-		t.writeCode(`	default:
-		panic("index out of bound")
-	}
-}`)
-
-		t.writeCode(`
-func (t *%s) SetSecondaryValue(index int, v interface{}) {
-	switch index {`, table.StructName)
-		for i, index := range table.SecondaryIndexes {
-			t.writeCode(`    case %d:`, i)
-			value := fmt.Sprintf("v.(%s)", GetIndexType(index.Type))
-			if strings.Index(index.Setter, "%v") >= 0 {
-				t.writeCode(fmt.Sprintf("        "+index.Setter, value))
-			} else {
-				t.writeCode(fmt.Sprintf("        %s=%s", index.Setter, value))
-			}
-		}
-
-		t.writeCode(`	default:
-			panic("unknown index")
-		}
-}`)
-
-		t.writeCode(cUnpackerCode, table.StructName)
+		t.writeCodeEx(cStructTemplate, table)
 
 		//generate singleton db code
 		if table.Singleton {
-			t.writeCode(cSingletonCode, table.StructName, StringToName(table.TableName))
+			n := NewTableTemplate(table.StructName, table.TableName, table.SecondaryIndexes)
+			t.writeCodeEx(cSingletonCode, n)
+			// t.writeCode(cSingletonCode, table.StructName, StringToName(table.TableName))
 			continue
 		}
 
@@ -1613,28 +1594,11 @@ func (t *%s) SetSecondaryValue(index int, v interface{}) {
 			t.writeCode("}")
 		}
 
-		t.writeCode(cDBTemplate, table.StructName, StringToName(table.TableName), table.TableName)
-		t.writeCode(cNewMultiIndexTemplate, table.StructName, StringToName(table.TableName), table.TableName)
-		for i, index := range table.SecondaryIndexes {
-			idxTable := (StringToName(table.TableName) & uint64(0xfffffffffffffff0)) | uint64(i)
-			if index.Type == "IDX64" {
-				t.writeCode("    mi.IDXDBs[%[1]d] = database.NewIdxDB64(%[1]d, code.N, scope.N, uint64(%[2]d))", i, idxTable)
-			} else if index.Type == "IDX128" {
-				t.writeCode("    mi.IDXDBs[%[1]d] = database.NewIdxDB128(%[1]d, code.N, scope.N, uint64(%[2]d))", i, idxTable)
-			} else if index.Type == "IDX256" {
-				t.writeCode("    mi.IDXDBs[%[1]d] = database.NewIdxDB256(%[1]d, code.N, scope.N, uint64(%[2]d))", i, idxTable)
-			} else if index.Type == "IDXFloat64" {
-				t.writeCode("    mi.IDXDBs[%[1]d] = database.NewIdxDBFloat64(%[1]d, code.N, scope.N, uint64(%[2]d))", i, idxTable)
-			} else if index.Type == "IDXFloat128" {
-				t.writeCode("    mi.IDXDBs[%[1]d] = database.NewIdxDBFloat128(%[1]d, code.N, scope.N, uint64(%[2]d))", i, idxTable)
-			}
-		}
-		t.writeCode("    return &%[1]sDB{mi}\n}", table.StructName)
+		t.writeCodeEx(cDBTemplate, table)
+		// t.writeCode(cDBTemplate, table.StructName, StringToName(table.TableName), table.TableName)
 
-		for i := range table.SecondaryIndexes {
-			index := &table.SecondaryIndexes[i]
-			t.writeCode(cGetDBTemplate, table.StructName, index.Name, i, indexTypeToSecondaryDBName(index.Type))
-		}
+		n := NewTableTemplate(table.StructName, table.TableName, table.SecondaryIndexes)
+		t.writeCodeEx(cNewMultiIndexTemplate, n)
 	}
 
 	for i := range t.specialAbiTypes {
