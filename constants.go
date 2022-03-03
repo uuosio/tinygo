@@ -52,9 +52,8 @@ func New{{.Name}}DB(code chain.Name, scope chain.Name) *{{.Name}}DB {
 }
 
 {{- range $i, $val := .Indexes}}
-func (mi *{{$.Name}}DB) GetIdxDB{{$val.Name}}() *database.{{$val.DBType}}I {
-	secondaryDB := mi.GetIdxDBByIndex({{$i}})
-	return &database.{{$val.DBType}}I{secondaryDB}
+func (mi *{{$.Name}}DB) GetIdxDB{{$val.Name}}() *database.{{$val.DBType}} {
+	return mi.GetIdxDBByIndex({{$i}}).(*database.{{$val.DBType}})
 }
 {{- end}}
 `
