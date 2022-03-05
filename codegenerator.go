@@ -712,7 +712,6 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				isContractStruct = true
 			}
 		} else if strings.HasPrefix(lastLineDoc, "//variant") {
-			log.Printf("++++++++++++parse variant\n")
 			structType = NewStructType("//variant")
 			parts := strings.Fields(lastLineDoc)
 			partMap := make(map[string]bool)
@@ -739,7 +738,6 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 	for _, spec := range v.Specs {
 		v := spec.(*ast.TypeSpec)
 		name := v.Name.Name
-		log.Printf("+++++++struct name: %v", name)
 		if isContractStruct {
 			t.contractStructName = name
 			//Do not add contract struct to struct list
@@ -844,8 +842,6 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
 			}
 		}
-
-		log.Printf("++++++++++++++++++11 %v\n", structType.IsVariant())
 
 		t.structs = append(t.structs, &info)
 		if strings.TrimSpace(lastLineDoc) == "//packer" {
