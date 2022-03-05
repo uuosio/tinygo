@@ -431,12 +431,25 @@ func (t *{{.StructName}}) Size() int {
 `
 
 const cVariantTemplate = `
+func New{{.StructName}}(value interface{}) *{{.StructName}} {
+	ret := &{{.StructName}}{}
+	switch value.(type) {
+		{{- range $i, $member := .Members}}
+		case *{{$member.Type}}:
+				ret.value = value
+		{{- end}}
+		default:
+			chain.Check(false, "unknown variant type")	
+	}
+	return ret
+}
+
 func (t *{{.StructName}}) Pack() []byte {
     enc := chain.NewEncoder(t.Size())
 	{{- range $i, $member := .Members}}
 	if _, ok := t.value.(*{{$member.Type}}); ok {
 		enc.PackUint8(uint8({{$i}}))
-		enc.Pack(t.value)
+		{{$member.PackVariantMember}}
 		return enc.GetBytes()
 	}
 	{{- end}}

@@ -54,324 +54,13 @@ import (
 	extended_asset
 */
 
-func char_to_symbol(c byte) byte {
-	if c >= 'a' && c <= 'z' {
-		return (c - 'a') + 6
-	}
-
-	if c >= '1' && c <= '5' {
-		return (c - '1') + 1
-	}
-	return 0
+var largePackages = []string{
+	"\"strconv\"",
+	"\"fmt\"",
 }
 
-func StringToName(str string) uint64 {
-	length := len(str)
-	value := uint64(0)
-
-	for i := 0; i <= 12; i++ {
-		c := uint64(0)
-		if i < length && i <= 12 {
-			c = uint64(char_to_symbol(str[i]))
-		}
-		if i < 12 {
-			c &= 0x1f
-			c <<= 64 - 5*(i+1)
-		} else {
-			c &= 0x0f
-		}
-
-		value |= c
-	}
-
-	return value
-}
-
-func NameToString(value uint64) string {
-	charmap := []byte(".12345abcdefghijklmnopqrstuvwxyz")
-	// 13 dots
-	str := []byte{'.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.', '.'}
-
-	tmp := value
-	for i := 0; i <= 12; i++ {
-		var c byte
-		if i == 0 {
-			c = charmap[tmp&0x0f]
-		} else {
-			c = charmap[tmp&0x1f]
-		}
-		str[12-i] = c
-		if i == 0 {
-			tmp >>= 4
-		} else {
-			tmp >>= 5
-		}
-	}
-
-	i := len(str) - 1
-	for ; i >= 0; i-- {
-		if str[i] != '.' {
-			break
-		}
-	}
-	return string(str[:i+1])
-}
-
-func abiTypes() []string {
-	return []string{
-		"bool",
-		"int8",
-		"uint8",
-		"int16",
-		"uint16",
-		"int32",
-		"uint32",
-		"int64",
-		"uint64",
-		"int128",
-		"uint128",
-		"varint32",
-		"varuint32",
-		"float32",
-		"float64",
-		"float128",
-		"time_point",
-		"time_point_sec",
-		"block_timestamp_type",
-		"name",
-		"bytes",
-		"string",
-		"checksum160",
-		"checksum256",
-		"checksum512",
-		"public_key",
-		"signature",
-		"symbol",
-		"symbol_code",
-		"asset",
-		"extended_asset",
-	}
-}
-
-func _convertToAbiType(goType string) (string, bool) {
-	switch goType {
-	case "byte":
-		return "uint8", true
-	case "bool":
-		return "bool", true
-	case "int8":
-		return "int8", true
-	case "uint8":
-		return "uint8", true
-	case "int16":
-		return "int16", true
-	case "uint16":
-		return "uint16", true
-	case "int32":
-		return "int32", true
-	case "uint32":
-		return "uint32", true
-	case "int64":
-		return "int64", true
-	case "uint64":
-		return "uint64", true
-	case "string":
-		return "string", true
-	case "float32":
-		return "float32", true
-	case "float64":
-		return "float64", true
-	case "chain.VarInt32":
-		return "varint32", true
-	case "chain.VarUint32":
-		return "varuint32", true
-	case "chain.Int128":
-		return "int128", true
-	case "chain.Uint128":
-		return "uint128", true
-	case "chain.Float128":
-		return "float128", true
-	case "chain.Name":
-		return "name", true
-	case "chain.TimePoint":
-		return "time_point", true
-	case "chain.TimePointSec":
-		return "time_point_sec", true
-	case "chain.BlockTimestampType":
-		return "block_timestamp_type", true
-	case "chain.Checksum160":
-		return "checksum160", true
-	case "chain.Checksum256":
-		return "checksum256", true
-	case "chain.Uint256":
-		return "checksum256", true
-	case "chain.Checksum512":
-		return "checksum512", true
-	case "chain.PublicKey":
-		return "public_key", true
-	case "chain.Signature":
-		return "signature", true
-	case "chain.Symbol":
-		return "symbol", true
-	case "chain.SymbolCode":
-		return "symbol_code", true
-	case "chain.Asset":
-		return "asset", true
-	case "chain.ExtendedAsset":
-		return "extended_asset", true
-	default:
-		return "", false
-	}
-}
-
-const (
-	TYPE_SLICE = iota + 1
-	TYPE_POINTER
-)
-
-type StructMember struct {
-	Name        string
-	Type        string
-	LeadingType int
-	Pos         token.Pos
-}
-
-func (t *StructMember) IsPointer() bool {
-	return t.LeadingType == TYPE_POINTER
-}
-
-func (t *StructMember) IsSlice() bool {
-	return t.LeadingType == TYPE_SLICE
-}
-
-func (t *StructMember) unpackBaseType() string {
-	var varName string
-	if t.IsSlice() {
-		varName = fmt.Sprintf("t.%s[i]", t.Name)
-	} else {
-		varName = fmt.Sprintf("t.%s", t.Name)
-	}
-	switch t.Type {
-	case "bool":
-		return unpackType("UnpackBool", varName)
-	case "byte":
-		return unpackType("UnpackUint8", varName)
-	case "int8":
-		return unpackType("UnpackInt8", varName)
-	case "uint8":
-		return unpackType("UnpackUint8", varName)
-	case "int16":
-		return unpackType("UnpackInt16", varName)
-	case "uint16":
-		return unpackType("UnpackUint16", varName)
-	case "int32":
-		return unpackType("UnpackInt32", varName)
-	case "uint32":
-		return unpackType("UnpackUint32", varName)
-	case "int64":
-		return unpackType("UnpackInt64", varName)
-	case "uint64":
-		return unpackType("UnpackUint64", varName)
-	case "chain.Name":
-		return unpackType("UnpackName", varName)
-	case "bytes":
-		return unpackType("UnpackBytes", varName)
-	case "string":
-		return unpackType("UnpackString", varName)
-	case "float32":
-		return unpackType("UnpackFloat32", varName)
-	case "float64":
-		return unpackType("UnpackFloat64", varName)
-	case "[]byte":
-		return unpackType("UnpackBytes", varName)
-	//TODO: handle other types that does not have Unpacker interface
-	case "int":
-		panic("int type is not supported")
-	default:
-		return fmt.Sprintf("dec.UnpackI(&%s)", varName)
-		// 	if t.IsPointer() {
-		// 		return fmt.Sprintf(`
-		// %[1]s = &%[2]s{}
-		// dec.UnpackI(%[1]s)`, varName, t.Type)
-		// 	} else {
-		// 		return fmt.Sprintf("dec.UnpackI(&%s)", varName)
-		// 	}
-	}
-	return ""
-	// int128
-	// uint128
-	// varint32
-	// varuint32
-	// float32
-	// float64
-	// float128
-	// time_point
-	// time_point_sec
-	// block_timestamp_type
-	// checksum160
-	// checksum256
-	// checksum512
-	// public_key
-	// signature
-	// symbol
-	// symbol_code
-	// asset
-	// extended_asset
-}
-
-func (t *StructMember) PackMember() string {
-	if t.Name == "" {
-		err := fmt.Errorf("anonymount Type does not supported currently: %s", t.Type)
-		panic(err)
-	}
-
-	if t.IsSlice() {
-		code, err := packArrayType(t.Name, t.Type)
-		if err != nil {
-			panic(err)
-		}
-		return code
-	} else {
-		return packNotArrayType(t.Name, t.Type, "    ")
-	}
-}
-
-func (s StructMember) UnpackMember() string {
-	if s.Name == "" {
-		err := fmt.Errorf("anonymount Type does not supported currently: %s", s.Type)
-		panic(err)
-	}
-
-	if s.IsSlice() {
-		if s.Type == "byte" {
-			return unpackType("UnpackBytes", fmt.Sprintf("t.%s", s.Name))
-		} else {
-			unpackCode := s.unpackBaseType()
-			return fmt.Sprintf(`
-	{
-		length := dec.UnpackLength()
-		t.%s = make([]%s, length)
-		for i:=0; i<length; i++ {
-		%s
-		}
-	}`, s.Name, s.Type, unpackCode)
-		}
-	} else {
-		return s.unpackBaseType()
-	}
-}
-
-func (s StructMember) GetSize() string {
-	if s.IsSlice() {
-		code := fmt.Sprintf("    size += chain.PackedVarUint32Length(uint32(len(t.%s)))\n", s.Name)
-		return code + calcArrayMemberSize(s.Name, s.Type)
-	} else {
-		return calcNotArrayMemberSize(s.Name, s.Type)
-	}
-}
-
-func (s StructMember) GetVariantSize() string {
-	return calcNotArrayMemberSize(fmt.Sprintf("value.(*%s)", s.Type), s.Type)
+var errorPackages = []string{
+	"\"log\"",
 }
 
 type ActionInfo struct {
@@ -389,15 +78,6 @@ type SecondaryIndexInfo struct {
 	Name   string
 	Getter string
 	Setter string
-}
-
-func (t SecondaryIndexInfo) GetSetter() string {
-	value := fmt.Sprintf("v.(%s)", GetIndexType(t.Type))
-	if strings.Index(t.Setter, "%v") >= 0 {
-		return fmt.Sprintf(t.Setter, value)
-	} else {
-		return fmt.Sprintf("%s=%s", t.Setter, value)
-	}
 }
 
 const (
@@ -503,6 +183,134 @@ type ABI struct {
 	ErrorMessages    []string     `json:"error_messages"`
 }
 
+const (
+	TYPE_SLICE = iota + 1
+	TYPE_POINTER
+)
+
+type StructMember struct {
+	Name        string
+	Type        string
+	LeadingType int
+	Pos         token.Pos
+}
+
+func (t *StructMember) IsPointer() bool {
+	return t.LeadingType == TYPE_POINTER
+}
+
+func (t *StructMember) IsSlice() bool {
+	return t.LeadingType == TYPE_SLICE
+}
+
+func (t *StructMember) unpackBaseType() string {
+	var varName string
+	if t.IsSlice() {
+		varName = fmt.Sprintf("t.%s[i]", t.Name)
+	} else {
+		varName = fmt.Sprintf("t.%s", t.Name)
+	}
+
+	packer, ok := UnpackBasicType(varName, t.Type)
+	if ok {
+		return packer
+	} else {
+		return fmt.Sprintf("dec.UnpackI(&%s)", varName)
+	}
+	// int128
+	// uint128
+	// varint32
+	// varuint32
+	// float32
+	// float64
+	// float128
+	// time_point
+	// time_point_sec
+	// block_timestamp_type
+	// checksum160
+	// checksum256
+	// checksum512
+	// public_key
+	// signature
+	// symbol
+	// symbol_code
+	// asset
+	// extended_asset
+}
+
+func (t *StructMember) PackMember() string {
+	if t.Name == "" {
+		err := fmt.Errorf("anonymount Type does not supported currently: %s", t.Type)
+		panic(err)
+	}
+
+	if t.IsSlice() {
+		code, err := packArrayType(t.Name, t.Type)
+		if err != nil {
+			panic(err)
+		}
+		return code
+	} else {
+		return packNotArrayType(t.Name, t.Type, "    ")
+	}
+}
+
+func (s StructMember) UnpackMember() string {
+	if s.Name == "" {
+		err := fmt.Errorf("anonymount Type does not supported currently: %s", s.Type)
+		panic(err)
+	}
+
+	if s.IsSlice() {
+		if s.Type == "byte" {
+			return unpackType("UnpackBytes", fmt.Sprintf("t.%s", s.Name))
+		} else {
+			unpackCode := s.unpackBaseType()
+			return fmt.Sprintf(`
+	{
+		length := dec.UnpackLength()
+		t.%s = make([]%s, length)
+		for i:=0; i<length; i++ {
+		%s
+		}
+	}`, s.Name, s.Type, unpackCode)
+		}
+	} else {
+		return s.unpackBaseType()
+	}
+}
+
+func (s StructMember) GetSize() string {
+	if s.IsSlice() {
+		code := fmt.Sprintf("    size += chain.PackedVarUint32Length(uint32(len(t.%s)))\n", s.Name)
+		return code + calcArrayMemberSize(s.Name, s.Type)
+	} else {
+		return calcNotArrayMemberSize(s.Name, s.Type)
+	}
+}
+
+func (s StructMember) PackVariantMember() string {
+	packer, ok := PackBasicType(fmt.Sprintf("(*(t.value.(*%s)))", s.Type), s.Type)
+	if ok {
+		return packer
+	} else {
+		return "enc.Pack(t.value)"
+	}
+}
+
+func (s StructMember) GetVariantSize() string {
+	return calcNotArrayMemberSize(fmt.Sprintf("value.(*%s)", s.Type), s.Type)
+}
+
+func (t SecondaryIndexInfo) GetSetter() string {
+	value := fmt.Sprintf("v.(%s)", GetIndexType(t.Type))
+	if strings.Index(t.Setter, "%v") >= 0 {
+		return fmt.Sprintf(t.Setter, value)
+	} else {
+		return fmt.Sprintf("%s=%s", t.Setter, value)
+	}
+}
+
 func NewCodeGenerator() *CodeGenerator {
 	t := &CodeGenerator{}
 	t.structMap = make(map[string]*StructInfo)
@@ -524,7 +332,7 @@ func NewCodeGenerator() *CodeGenerator {
 }
 
 func (t *CodeGenerator) convertToAbiType(pos token.Pos, goType string) (string, error) {
-	abiType, ok := _convertToAbiType(goType)
+	abiType, ok := GoType2PrimitiveABIType(goType)
 	if ok {
 		return abiType, nil
 	}
@@ -907,13 +715,20 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 			log.Printf("++++++++++++parse variant\n")
 			structType = NewStructType("//variant")
 			parts := strings.Fields(lastLineDoc)
+			partMap := make(map[string]bool)
 			for i := range parts {
 				if i == 0 {
 					continue
 				}
+				part := parts[i]
+				if _, ok := partMap[part]; ok {
+					return t.newError(doc.Pos(), "duplicated type in variant: %s", part)
+				}
+				partMap[part] = true
 				member := StructMember{}
 				member.Name = ""
-				member.Type = parts[i]
+				member.Type = part
+				member.Pos = doc.Pos()
 				info.Members = append(info.Members, member)
 			}
 		} else {
@@ -1127,15 +942,6 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	return nil
 }
 
-var largePackages = []string{
-	"\"strconv\"",
-	"\"fmt\"",
-}
-
-var errorPackages = []string{
-	"\"log\"",
-}
-
 func isLargePackage(pkgName string) bool {
 	for i := range largePackages {
 		if pkgName == largePackages[i] {
@@ -1313,58 +1119,12 @@ func (t *CodeGenerator) GenNotifyCode() {
 }
 
 func packNotArrayType(goName string, goType string, indent string) string {
-	// bytes
-	var format string
-	switch goType {
-	case "bool":
-		format = "enc.PackBool(t.%s)"
-	case "int8":
-		format = "enc.PackUint8(uint8(t.%s))"
-	case "uint8":
-		format = "enc.PackUint8(t.%s)"
-	case "int16":
-		format = "enc.PackInt16(t.%s)"
-	case "uint16":
-		format = "enc.PackUint16(t.%s)"
-	case "int32":
-		format = "enc.PackInt32(t.%s)"
-	case "uint32":
-		format = "enc.PackUint32(t.%s)"
-	case "int64":
-		format = "enc.PackInt64(t.%s)"
-	case "uint64":
-		format = "enc.PackUint64(t.%s)"
-	case "chain.Int128":
-		format = "enc.WriteBytes(t.%s[:])"
-	case "chain.Uint128":
-		format = "enc.WriteBytes(t.%s[:])"
-	case "chain.VarInt32":
-		format = "enc.PackVarInt32(int32(t.%s))"
-	case "chain.VarUint32":
-		format = "enc.PackVarUint32(uint32(t.%s))"
-	case "float32":
-		format = "enc.PackFloat32(t.%s)"
-	case "float64":
-		format = "enc.PackFloat64(t.%s)"
-	case "float128":
-		format = "enc.WriteBytes(t.%s[:])"
-	case "bytes":
-		format = "enc.PackBytes(t.%s)"
-	case "string":
-		format = "enc.PackString(t.%s)"
-	case "chain.Name":
-		format = "enc.PackUint64(t.%s.N)"
-	case "chain.TimePoint", "chain.TimePointSec",
-		"chain.BlockTimestampType", "chain.Checksum160",
-		"chain.Checksum256", "chain.Checksum512",
-		"chain.PublicKeyType", "chain.Signature",
-		"chain.Symbol", "chain.SymbolCode",
-		"chain.Asset", "chain.ExtendedAsset":
-		format = "enc.Pack(&t.%s)"
-	default:
-		format = "enc.Pack(&t.%s)"
+	packer, ok := PackBasicType("t."+goName, goType)
+	if ok {
+		return packer
+	} else {
+		return fmt.Sprintf("enc.Pack(&t.%s)", goName)
 	}
-	return fmt.Sprintf(indent+format, goName)
 }
 
 func packArrayType(goName string, goType string) (string, error) {
@@ -1516,161 +1276,6 @@ func (t *CodeGenerator) genSizeCodeForSpecialStruct(specialType int, structName 
 		t.writeCode("    return size")
 		t.writeCode("}")
 	}
-}
-
-func calcNotArrayMemberSize(name string, goType string) string {
-	var code string
-
-	switch goType {
-	case "string":
-		code = fmt.Sprintf("size += chain.PackedVarUint32Length(uint32(len(t.%s))) + len(t.%s)", name, name)
-	case "byte":
-		code = "size += 1"
-	case "bool":
-		code = "size += 1"
-	case "int8":
-		code = "size += 1"
-	case "uint8":
-		code = "size += 1"
-	case "int16":
-		code = "size += 2"
-	case "uint16":
-		code = "size += 2"
-	case "int":
-		code = "size += 4"
-	case "int32":
-		code = "size += 4"
-	case "uint32":
-		code = "size += 4"
-	case "int64":
-		code = "size += 8"
-	case "uint64":
-		code = "size += 8"
-	case "chain.Int128":
-		code = "size += 16"
-	case "chain.Uint128":
-		code = "size += 16"
-	case "chain.Uint256":
-		code = "size += 32"
-	case "float32":
-		code = "size += 4"
-	case "float64":
-		code = "size += 8"
-	case "chain.Name":
-		code = "size += 8"
-	case "chain.Signature":
-		code = fmt.Sprintf("size += t.%s.Size()", name)
-	case "chain.PublicKey":
-		code = fmt.Sprintf("size += t.%s.Size()", name)
-	case "chain.Symbol":
-		code = "size += 8"
-	default:
-		code = fmt.Sprintf("	size += t.%[1]s.Size()", name)
-	}
-	return code + " //" + name
-}
-
-func calcArrayMemberSize(name string, goType string) string {
-	switch goType {
-	case "byte":
-		return fmt.Sprintf("size += len(t.%s)", name)
-	case "[]byte":
-		return fmt.Sprintf(`for i := range t.%[1]s {
-	size += chain.PackedVarUint32Length(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
-}`, name)
-	case "string":
-		return fmt.Sprintf(`for i := range t.%[1]s {
-	 size += chain.PackedVarUint32Length(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
-}`, name)
-	case "bool":
-		return fmt.Sprintf("size += len(t.%s)", name)
-	case "int8":
-		return fmt.Sprintf("size += len(t.%s)", name)
-	case "uint8":
-		return fmt.Sprintf("size += len(t.%s)", name)
-	case "int16":
-		return fmt.Sprintf("size += len(t.%s)*2", name)
-	case "uint16":
-		return fmt.Sprintf("size += len(t.%s)*2", name)
-	case "int":
-		return fmt.Sprintf("size += len(t.%s)*4", name)
-	case "int32":
-		return fmt.Sprintf("size += len(t.%s)*4", name)
-	case "uint32":
-		return fmt.Sprintf("size += len(t.%s)*4", name)
-	case "int64":
-		return fmt.Sprintf("size += len(t.%s)*8", name)
-	case "uint64":
-		return fmt.Sprintf("size += len(t.%s)*8", name)
-	case "chain.Uint128":
-		return fmt.Sprintf("size += len(t.%s)*16", name)
-	case "chain.Uint256":
-		return fmt.Sprintf("size += len(t.%s)*32", name)
-	case "float32":
-		return fmt.Sprintf("size += len(t.%s)*4", name)
-	case "float64":
-		return fmt.Sprintf("size += len(t.%s)*8", name)
-	case "chain.Name":
-		return fmt.Sprintf("size += len(t.%s)*8", name)
-	default:
-		return fmt.Sprintf(`
-    for i := range t.%[1]s {
-        size += t.%[1]s[i].Size()
-    }`, name)
-	}
-}
-
-func GetIndexType(index string) string {
-	switch index {
-	case "IDX64":
-		return "uint64"
-	case "IDX128":
-		return "chain.Uint128"
-	case "IDX256":
-		return "chain.Uint256"
-	case "IDXFloat64":
-		return "float64"
-	case "IDXFloat128":
-		return "chain.Float128"
-	default:
-		panic(fmt.Sprintf("unknown secondary index type: %s", index))
-	}
-}
-
-func indexTypeToSecondaryType(indexType string) string {
-	switch indexType {
-	case "IDX64":
-		return "uint64"
-	case "IDX128":
-		return "chain.Uint128"
-	case "IDX256":
-		return "chain.Uint256"
-	case "IDXFloat64":
-		return "float64"
-	case "IDXFloat128":
-		return "chain.Float128"
-	default:
-		panic(fmt.Sprintf("unknown secondary index type: %s", indexType))
-	}
-	return ""
-}
-
-func indexTypeToSecondaryDBName(indexType string) string {
-	switch indexType {
-	case "IDX64":
-		return "IdxDB64"
-	case "IDX128":
-		return "IdxDB128"
-	case "IDX256":
-		return "IdxDB256"
-	case "IDXFloat64":
-		return "IdxDBFloat64"
-	case "IDXFloat128":
-		return "IdxDBFloat128"
-	default:
-		panic(fmt.Sprintf("unknown secondary index type: %s", indexType))
-	}
-	return ""
 }
 
 func (t *CodeGenerator) GenCode() error {
