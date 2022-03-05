@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -224,8 +225,7 @@ func _convertToAbiType(goType string) (string, bool) {
 }
 
 const (
-	TYPE_ARRAY = iota + 1
-	TYPE_SLICE
+	TYPE_SLICE = iota + 1
 	TYPE_POINTER
 )
 
@@ -236,11 +236,149 @@ type StructMember struct {
 	Pos         token.Pos
 }
 
+func (t *StructMember) IsPointer() bool {
+	return t.LeadingType == TYPE_POINTER
+}
+
+func (t *StructMember) IsSlice() bool {
+	return t.LeadingType == TYPE_SLICE
+}
+
+func (t *StructMember) unpackBaseType() string {
+	var varName string
+	if t.IsSlice() {
+		varName = fmt.Sprintf("t.%s[i]", t.Name)
+	} else {
+		varName = fmt.Sprintf("t.%s", t.Name)
+	}
+	switch t.Type {
+	case "bool":
+		return unpackType("UnpackBool", varName)
+	case "byte":
+		return unpackType("UnpackUint8", varName)
+	case "int8":
+		return unpackType("UnpackInt8", varName)
+	case "uint8":
+		return unpackType("UnpackUint8", varName)
+	case "int16":
+		return unpackType("UnpackInt16", varName)
+	case "uint16":
+		return unpackType("UnpackUint16", varName)
+	case "int32":
+		return unpackType("UnpackInt32", varName)
+	case "uint32":
+		return unpackType("UnpackUint32", varName)
+	case "int64":
+		return unpackType("UnpackInt64", varName)
+	case "uint64":
+		return unpackType("UnpackUint64", varName)
+	case "chain.Name":
+		return unpackType("UnpackName", varName)
+	case "bytes":
+		return unpackType("UnpackBytes", varName)
+	case "string":
+		return unpackType("UnpackString", varName)
+	case "float32":
+		return unpackType("UnpackFloat32", varName)
+	case "float64":
+		return unpackType("UnpackFloat64", varName)
+	case "[]byte":
+		return unpackType("UnpackBytes", varName)
+	//TODO: handle other types that does not have Unpacker interface
+	case "int":
+		panic("int type is not supported")
+	default:
+		return fmt.Sprintf("dec.UnpackI(&%s)", varName)
+		// 	if t.IsPointer() {
+		// 		return fmt.Sprintf(`
+		// %[1]s = &%[2]s{}
+		// dec.UnpackI(%[1]s)`, varName, t.Type)
+		// 	} else {
+		// 		return fmt.Sprintf("dec.UnpackI(&%s)", varName)
+		// 	}
+	}
+	return ""
+	// int128
+	// uint128
+	// varint32
+	// varuint32
+	// float32
+	// float64
+	// float128
+	// time_point
+	// time_point_sec
+	// block_timestamp_type
+	// checksum160
+	// checksum256
+	// checksum512
+	// public_key
+	// signature
+	// symbol
+	// symbol_code
+	// asset
+	// extended_asset
+}
+
+func (t *StructMember) PackMember() string {
+	if t.Name == "" {
+		err := fmt.Errorf("anonymount Type does not supported currently: %s", t.Type)
+		panic(err)
+	}
+
+	if t.IsSlice() {
+		code, err := packArrayType(t.Name, t.Type)
+		if err != nil {
+			panic(err)
+		}
+		return code
+	} else {
+		return packNotArrayType(t.Name, t.Type, "    ")
+	}
+}
+
+func (s StructMember) UnpackMember() string {
+	if s.Name == "" {
+		err := fmt.Errorf("anonymount Type does not supported currently: %s", s.Type)
+		panic(err)
+	}
+
+	if s.IsSlice() {
+		if s.Type == "byte" {
+			return unpackType("UnpackBytes", fmt.Sprintf("t.%s", s.Name))
+		} else {
+			unpackCode := s.unpackBaseType()
+			return fmt.Sprintf(`
+	{
+		length := dec.UnpackLength()
+		t.%s = make([]%s, length)
+		for i:=0; i<length; i++ {
+		%s
+		}
+	}`, s.Name, s.Type, unpackCode)
+		}
+	} else {
+		return s.unpackBaseType()
+	}
+}
+
+func (s StructMember) GetSize() string {
+	if s.IsSlice() {
+		code := fmt.Sprintf("    size += chain.PackedVarUint32Length(uint32(len(t.%s)))\n", s.Name)
+		return code + calcArrayMemberSize(s.Name, s.Type)
+	} else {
+		return calcNotArrayMemberSize(s.Name, s.Type)
+	}
+}
+
+func (s StructMember) GetVariantSize() string {
+	return calcNotArrayMemberSize(fmt.Sprintf("value.(*%s)", s.Type), s.Type)
+}
+
 type ActionInfo struct {
-	ActionName string
-	FuncName   string
 	StructName string
 	Members    []StructMember
+	ActionName string
+	FuncName   string
 	IsNotify   bool
 	Ignore     bool
 }
@@ -289,16 +427,16 @@ type SpecialAbiType struct {
 }
 
 type StructInfo struct {
+	StructName       string
+	Members          []StructMember
 	PackageName      string
 	TableName        string
 	RawTableName     uint64
 	Singleton        bool
 	IgnoreFromABI    bool
-	StructName       string
 	Comment          string
 	PrimaryKey       string
 	SecondaryIndexes []SecondaryIndexInfo
-	Members          []StructMember
 }
 
 type CodeGenerator struct {
@@ -308,13 +446,14 @@ type CodeGenerator struct {
 	fset            *token.FileSet
 	codeFile        *os.File
 	actions         []ActionInfo
-	structs         []StructInfo
+	structs         []*StructInfo
 	specialAbiTypes []SpecialAbiType
 	structMap       map[string]*StructInfo
 
 	hasMainFunc        bool
 	abiStructsMap      map[string]*StructInfo
 	PackerMap          map[string]*StructInfo
+	VariantMap         map[string]*StructInfo
 	actionMap          map[string]bool
 	contractStructName string
 	hasNewContractFunc bool
@@ -347,16 +486,21 @@ type ABIStruct struct {
 	Fields []ABIStructField `json:"fields"`
 }
 
+type VariantDef struct {
+	Name  string   `json:"name"`
+	Types []string `json:"types"`
+}
+
 type ABI struct {
-	Version          string      `json:"version"`
-	Structs          []ABIStruct `json:"structs"`
-	Types            []string    `json:"types"`
-	Actions          []ABIAction `json:"actions"`
-	Tables           []ABITable  `json:"tables"`
-	RicardianClauses []string    `json:"ricardian_clauses"`
-	Variants         []string    `json:"variants"`
-	AbiExtensions    []string    `json:"abi_extensions"`
-	ErrorMessages    []string    `json:"error_messages"`
+	Version          string       `json:"version"`
+	Structs          []ABIStruct  `json:"structs"`
+	Types            []string     `json:"types"`
+	Actions          []ABIAction  `json:"actions"`
+	Tables           []ABITable   `json:"tables"`
+	RicardianClauses []string     `json:"ricardian_clauses"`
+	Variants         []VariantDef `json:"variants"`
+	AbiExtensions    []string     `json:"abi_extensions"`
+	ErrorMessages    []string     `json:"error_messages"`
 }
 
 func NewCodeGenerator() *CodeGenerator {
@@ -364,6 +508,7 @@ func NewCodeGenerator() *CodeGenerator {
 	t.structMap = make(map[string]*StructInfo)
 	t.abiStructsMap = make(map[string]*StructInfo)
 	t.PackerMap = make(map[string]*StructInfo)
+	t.VariantMap = make(map[string]*StructInfo)
 	t.actionMap = make(map[string]bool)
 	t.abiTypeMap = make(map[string]bool)
 	t.indexTypeMap = make(map[string]bool)
@@ -388,6 +533,11 @@ func (t *CodeGenerator) convertToAbiType(pos token.Pos, goType string) (string, 
 	if _, ok := t.abiStructsMap[goType]; ok {
 		return goType, nil
 	}
+
+	if _, ok := t.VariantMap[goType]; ok {
+		return goType, nil
+	}
+
 	msg := fmt.Sprintf("type %s can not be converted to an ABI type", goType)
 	if goType == "Asset" || goType == "Symbol" || goType == "Name" {
 		msg += fmt.Sprintf("\nDo you mean chain.%s?", goType)
@@ -400,7 +550,7 @@ func (t *CodeGenerator) convertType(goType StructMember) (string, error) {
 	typ := goType.Type
 	var specialAbiType *SpecialAbiType
 	//special case for []byte type
-	if typ == "byte" && goType.LeadingType == TYPE_SLICE {
+	if typ == "byte" && goType.IsSlice() {
 		return "bytes", nil
 	}
 
@@ -419,7 +569,7 @@ func (t *CodeGenerator) convertType(goType StructMember) (string, error) {
 		return "", err
 	}
 
-	if goType.LeadingType == TYPE_SLICE {
+	if goType.IsSlice() {
 		// if abiType == "byte" {
 		// 	return "bytes", nil
 		// }
@@ -477,9 +627,7 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 	case *ast.ArrayType:
 		var leadingType int
 		if fieldType.Len != nil {
-			log.Printf("++++++fixed array %v ignored in %s\n", field.Names, structName)
-			return nil
-			leadingType = TYPE_ARRAY
+			return t.newError(field.Pos(), "fixed array does not supported in ABI")
 		} else {
 			leadingType = TYPE_SLICE
 		}
@@ -646,6 +794,58 @@ func splitAndTrimSpace(s string, sep string) []string {
 	return parts
 }
 
+const (
+	STRUCT_TYPE_UNKNOWN = iota + 1
+	STRUCT_TYPE_CONTRACT
+	STRUCT_TYPE_TABLE
+	STRUCT_TYPE_PACKER
+	STRUCT_TYPE_VARIANT
+)
+
+type StructType int
+
+func NewStructType(s string) StructType {
+	if s == "//table" {
+		return StructType(STRUCT_TYPE_TABLE)
+	} else if s == "//packer" {
+		return StructType(STRUCT_TYPE_PACKER)
+	} else if s == "//variant" {
+		return StructType(STRUCT_TYPE_VARIANT)
+	} else if s == "//contract" {
+		return StructType(STRUCT_TYPE_VARIANT)
+	} else {
+		return StructType(STRUCT_TYPE_UNKNOWN)
+	}
+}
+
+func (t StructType) IsTable() bool {
+	return int(t) == STRUCT_TYPE_TABLE
+}
+
+func (t StructType) IsPacker() bool {
+	return int(t) == STRUCT_TYPE_PACKER
+}
+
+func (t StructType) IsVariant() bool {
+	return int(t) == STRUCT_TYPE_VARIANT
+}
+
+func (t StructType) IsUnknown() bool {
+	return int(t) == STRUCT_TYPE_UNKNOWN
+}
+
+func _isPrimitiveType(s string) bool {
+	return false
+}
+
+func isPrimitiveType(tp ast.Expr) bool {
+	switch fieldType := tp.(type) {
+	case *ast.Ident:
+		return _isPrimitiveType(fieldType.Name)
+	}
+	return false
+}
+
 func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 	if v.Tok != token.TYPE {
 		return nil
@@ -659,11 +859,14 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 	info.PackageName = packageName
 	isContractStruct := false
 	var lastLineDoc string
+
+	structType := NewStructType("")
 	if v.Doc != nil {
 		n := len(v.Doc.List)
 		doc := v.Doc.List[n-1]
 		lastLineDoc = strings.TrimSpace(doc.Text)
 		if strings.HasPrefix(lastLineDoc, "//table") {
+			structType = NewStructType("//table")
 			//items := Split(lastLineDoc)
 			parts := strings.Fields(lastLineDoc)
 			if parts[0] == "//table" && (len(parts) >= 2 && len(parts) <= 4) {
@@ -689,6 +892,7 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				}
 			}
 		} else if strings.HasPrefix(lastLineDoc, "//contract") {
+			structType = NewStructType("//contract")
 			parts := strings.Fields(lastLineDoc)
 			if len(parts) == 2 {
 				name := parts[1]
@@ -699,12 +903,28 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				t.contractName = name
 				isContractStruct = true
 			}
+		} else if strings.HasPrefix(lastLineDoc, "//variant") {
+			log.Printf("++++++++++++parse variant\n")
+			structType = NewStructType("//variant")
+			parts := strings.Fields(lastLineDoc)
+			for i := range parts {
+				if i == 0 {
+					continue
+				}
+				member := StructMember{}
+				member.Name = ""
+				member.Type = parts[i]
+				info.Members = append(info.Members, member)
+			}
+		} else {
+			structType = NewStructType("lastLineDoc")
 		}
 	}
 
 	for _, spec := range v.Specs {
 		v := spec.(*ast.TypeSpec)
 		name := v.Name.Name
+		log.Printf("+++++++struct name: %v", name)
 		if isContractStruct {
 			t.contractStructName = name
 			//Do not add contract struct to struct list
@@ -717,9 +937,19 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 		}
 
 		info.StructName = name
+		if structType.IsVariant() {
+			t.VariantMap[info.StructName] = &info
+			continue
+		}
+
 		for _, field := range vv.Fields.List {
 			//*ast.FuncType *ast.Ident
 			//TODO panic on FuncType
+			switch field.Type.(type) {
+			case *ast.StarExpr:
+				err := t.newError(field.Pos(), "packer or table struct does not support pointer type!")
+				return err
+			}
 			err := t.parseField(name, field, &info.Members, true, false)
 			if err != nil {
 				return err
@@ -799,9 +1029,12 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
 			}
 		}
-		t.structs = append(t.structs, info)
+
+		log.Printf("++++++++++++++++++11 %v\n", structType.IsVariant())
+
+		t.structs = append(t.structs, &info)
 		if strings.TrimSpace(lastLineDoc) == "//packer" {
-			t.PackerMap[info.StructName] = &t.structs[len(t.structs)-1]
+			t.PackerMap[info.StructName] = &info
 		}
 	}
 	return nil
@@ -1016,6 +1249,16 @@ func (gen *CodeGenerator) writeCodeEx(temp string, s interface{}) error {
 	return t.Execute(gen.codeFile, s)
 }
 
+func genCodeWithTemplate(tpl string, s interface{}) (string, error) {
+	var buf bytes.Buffer
+	t := template.Must(template.New("template").Parse(tpl))
+	err := t.Execute(&buf, s)
+	if err != nil {
+		return "", err
+	}
+	return buf.String(), err
+}
+
 func (t *CodeGenerator) genActionCode(notify bool) error {
 	t.writeCode("        switch action.N {")
 	for _, action := range t.actions {
@@ -1029,7 +1272,7 @@ func (t *CodeGenerator) genActionCode(notify bool) error {
 			t.writeCode("            t.Unpack(data)")
 			args := "("
 			for i, member := range action.Members {
-				if member.LeadingType == TYPE_POINTER {
+				if member.IsPointer() {
 					args += "&t." + member.Name
 				} else {
 					args += "t." + member.Name
@@ -1043,7 +1286,7 @@ func (t *CodeGenerator) genActionCode(notify bool) error {
 		} else {
 			args := "("
 			for i, member := range action.Members {
-				if member.LeadingType == TYPE_POINTER || member.LeadingType == TYPE_SLICE {
+				if member.IsPointer() || member.IsSlice() {
 					//args += "&t." + member.Name
 					args += "nil"
 					if i != len(action.Members)-1 {
@@ -1069,7 +1312,7 @@ func (t *CodeGenerator) GenNotifyCode() {
 	t.genActionCode(true)
 }
 
-func (t *CodeGenerator) packNotArrayType(goName string, goType string, indent string) {
+func packNotArrayType(goName string, goType string, indent string) string {
 	// bytes
 	var format string
 	switch goType {
@@ -1121,134 +1364,38 @@ func (t *CodeGenerator) packNotArrayType(goName string, goType string, indent st
 	default:
 		format = "enc.Pack(&t.%s)"
 	}
-	t.writeCode(indent+format, goName)
+	return fmt.Sprintf(indent+format, goName)
 }
 
-func (t *CodeGenerator) packArrayType(goName string, goType string) {
+func packArrayType(goName string, goType string) (string, error) {
 	if goType == "byte" {
-		t.writeCode("    enc.PackBytes(t.%s)", goName)
+		return fmt.Sprintf("enc.PackBytes(t.%s)", goName), nil
 	} else {
-		t.writeCode("{")
-		t.writeCode("    enc.PackLength(len(t.%[1]s))", goName)
-		t.writeCode("    for i := range t.%[1]s {", goName)
-		t.packNotArrayType(goName+"[i]", goType, "        ")
-		t.writeCode("    }")
-		t.writeCode("}")
+		packMember := packNotArrayType(goName+"[i]", goType, "        ")
+		code, err := genCodeWithTemplate(`
+	{
+		enc.PackLength(len(t.{{.name}}))
+		for i := range t.{{.name}} {
+			{{.packMember}}
+		}
+	}`, map[string]string{"name": goName, "packMember": packMember})
+		return code, err
 	}
 }
 
-func (t *CodeGenerator) packType(member StructMember) {
-	if member.Name == "" {
-		log.Printf("anonymount Type does not supported currently: %s", member.Type)
-		return
-	}
-	if member.LeadingType == TYPE_SLICE {
-		t.packArrayType(member.Name, member.Type)
-	} else if member.LeadingType == TYPE_ARRAY {
-		t.writeCode("    for i := range t.%s {", member.Name)
-		t.packNotArrayType(member.Name+"[i]", member.Type, "        ")
-		t.writeCode("    }")
-	} else {
-		t.packNotArrayType(member.Name, member.Type, "    ")
-	}
-}
-
-func (t *CodeGenerator) unpackType(funcName string, varName string) {
-	t.writeCode("    %s = dec.%s()", varName, funcName)
+func unpackType(funcName string, varName string) string {
+	return fmt.Sprintf("%s = dec.%s()", varName, funcName)
 }
 
 func (t *CodeGenerator) unpackI(varName string) {
-	t.writeCode("    dec.UnpackI(&%s)", varName)
-}
-
-func (t *CodeGenerator) unpackBaseType(varName string, typ string) {
-	switch typ {
-	case "bool":
-		t.unpackType("UnpackBool", varName)
-	case "byte":
-		t.unpackType("UnpackUint8", varName)
-	case "int8":
-		t.unpackType("UnpackInt8", varName)
-	case "uint8":
-		t.unpackType("UnpackUint8", varName)
-	case "int16":
-		t.unpackType("UnpackInt16", varName)
-	case "uint16":
-		t.unpackType("UnpackUint16", varName)
-	case "int32":
-		t.unpackType("UnpackInt32", varName)
-	case "uint32":
-		t.unpackType("UnpackUint32", varName)
-	case "int64":
-		t.unpackType("UnpackInt64", varName)
-	case "uint64":
-		t.unpackType("UnpackUint64", varName)
-	case "chain.Name":
-		t.unpackType("UnpackName", varName)
-	case "bytes":
-		t.unpackType("UnpackBytes", varName)
-	case "string":
-		t.unpackType("UnpackString", varName)
-	case "float32":
-		t.unpackType("UnpackFloat32", varName)
-	case "float64":
-		t.unpackType("UnpackFloat64", varName)
-	case "[]byte":
-		t.unpackType("UnpackBytes", varName)
-	//TODO: handle other types that does not have Unpacker interface
-	case "int":
-		panic("int type is not supported")
-	default:
-		t.unpackI(varName)
-	}
-	// int128
-	// uint128
-	// varint32
-	// varuint32
-	// float32
-	// float64
-	// float128
-	// time_point
-	// time_point_sec
-	// block_timestamp_type
-	// checksum160
-	// checksum256
-	// checksum512
-	// public_key
-	// signature
-	// symbol
-	// symbol_code
-	// asset
-	// extended_asset
-}
-
-func (t *CodeGenerator) unpackMember(member StructMember) {
-	if member.Name == "" {
-		log.Printf("anonymount Type does not supported currently: %s", member.Type)
-		return
-	}
-	if member.LeadingType == TYPE_SLICE {
-		if member.Type == "byte" {
-			t.unpackType("UnpackBytes", fmt.Sprintf("t.%s", member.Name))
-		} else {
-			t.writeCode("{")
-			t.writeCode("    length := dec.UnpackLength()")
-			t.writeCode("    t.%s = make([]%s, length)", member.Name, member.Type)
-			t.writeCode("    for i:=0; i<length; i++ {")
-			t.unpackBaseType(fmt.Sprintf("t.%s[i]", member.Name), member.Type)
-			t.writeCode("    }")
-			t.writeCode("}")
-		}
-	} else {
-		t.unpackBaseType("t."+member.Name, member.Type)
-	}
+	t.writeCode("dec.UnpackI(&%s)", varName)
 }
 
 func (t *CodeGenerator) genStruct(structName string, members []StructMember) {
 	log.Println("+++action", structName)
 	t.writeCode("type %s struct {", structName)
 	for _, member := range members {
-		if member.LeadingType == TYPE_SLICE {
+		if member.IsSlice() {
 			t.writeCode("    %s []%s", member.Name, member.Type)
 		} else {
 			t.writeCode("    %s %s", member.Name, member.Type)
@@ -1257,22 +1404,30 @@ func (t *CodeGenerator) genStruct(structName string, members []StructMember) {
 	t.writeCode("}")
 }
 
-func (t *CodeGenerator) genPackCode(structName string, members []StructMember) {
-	t.writeCode("func (t *%s) Pack() []byte {", structName)
-	t.writeCode("    enc := chain.NewEncoder(t.Size())")
-	for _, member := range members {
-		t.packType(member)
+func (t *CodeGenerator) genPackUnpackCode(structName string, members []StructMember) {
+	type Struct struct {
+		StructName string
+		Members    []StructMember
 	}
-	t.writeCode("    return enc.GetBytes()\n}\n")
+	s := Struct{structName, members}
+	code, err := genCodeWithTemplate(cSerializerTemplate, s)
+	if err != nil {
+		panic(err)
+	}
+	t.writeCode(code)
 }
 
-func (t *CodeGenerator) genUnpackCode(structName string, members []StructMember) {
-	t.writeCode("func (t *%s) Unpack(data []byte) int {", structName)
-	t.writeCode("    dec := chain.NewDecoder(data)")
-	for _, member := range members {
-		t.unpackMember(member)
+func (t *CodeGenerator) genPackUnpackCodeForVariant(structName string, members []StructMember) {
+	type Struct struct {
+		StructName string
+		Members    []StructMember
 	}
-	t.writeCode("    return dec.Pos()\n}\n")
+	s := Struct{structName, members}
+	code, err := genCodeWithTemplate(cVariantTemplate, s)
+	if err != nil {
+		panic(err)
+	}
+	t.writeCode(code)
 }
 
 func (t *CodeGenerator) genPackCodeForSpecialStruct(specialType int, structName string, member StructMember) {
@@ -1283,7 +1438,8 @@ func (t *%s) Pack() []byte {
 		return []byte{}
 	}`, structName)
 		t.writeCode("    enc := chain.NewEncoder(t.Size())")
-		t.packType(member)
+		code := member.PackMember()
+		t.writeCode(code)
 		t.writeCode("    return enc.GetBytes()\n}\n")
 	} else if specialType == OptionalType {
 		t.writeCode(`
@@ -1293,7 +1449,7 @@ func (t *%s) Pack() []byte {
 	}`, structName)
 		t.writeCode("    enc := chain.NewEncoder(t.Size())")
 		t.writeCode("    enc.WriteUint8(uint8(1))")
-		t.packType(member)
+		t.writeCode(member.PackMember())
 		t.writeCode("    return enc.GetBytes()\n}\n")
 	}
 }
@@ -1309,7 +1465,7 @@ func (t *%s) Unpack(data []byte) int {
 		t.HasValue = true
 	}`, structName)
 		t.writeCode("    dec := chain.NewDecoder(data)")
-		t.unpackMember(member)
+		t.writeCode(member.UnpackMember())
 		t.writeCode("    return dec.Pos()\n}\n")
 	} else if specialType == OptionalType {
 		t.writeCode(`
@@ -1325,7 +1481,7 @@ func (t *%s) Unpack(data []byte) int {
 	} else {
 		chain.Check(false, "invalid optional value")
 	}`, structName)
-		t.unpackMember(member)
+		t.writeCode(member.UnpackMember())
 		t.writeCode("    return dec.Pos()\n}\n")
 	}
 }
@@ -1337,15 +1493,11 @@ func (t *CodeGenerator) genSizeCodeForSpecialStruct(specialType int, structName 
 		t.writeCode("    if !t.HasValue {")
 		t.writeCode("        return size")
 		t.writeCode("    }")
-		if member.LeadingType == TYPE_SLICE {
+		if member.IsSlice() {
 			t.writeCode("    size += chain.PackedVarUint32Length(uint32(len(t.%s)))", member.Name)
-			t.calcArrayMemberSize(member.Name, member.Type)
-		} else if member.LeadingType == TYPE_ARRAY {
-			t.writeCode("    for i := range t.%s {", member.Name)
-			t.calcNotArrayMemberSize(member.Name+"[i]", member.Type)
-			t.writeCode("    }")
+			t.writeCode(calcArrayMemberSize(member.Name, member.Type))
 		} else {
-			t.calcNotArrayMemberSize(member.Name, member.Type)
+			t.writeCode(calcNotArrayMemberSize(member.Name, member.Type))
 		}
 		t.writeCode("    return size")
 		t.writeCode("}")
@@ -1355,136 +1507,117 @@ func (t *CodeGenerator) genSizeCodeForSpecialStruct(specialType int, structName 
 		t.writeCode("    if !t.IsValid {")
 		t.writeCode("        return size")
 		t.writeCode("    }")
-		if member.LeadingType == TYPE_SLICE {
+		if member.IsSlice() {
 			t.writeCode("    size += chain.PackedVarUint32Length(uint32(len(t.%s)))", member.Name)
-			t.calcArrayMemberSize(member.Name, member.Type)
+			t.writeCode(calcArrayMemberSize(member.Name, member.Type))
 		} else {
-			t.calcNotArrayMemberSize(member.Name, member.Type)
+			t.writeCode(calcNotArrayMemberSize(member.Name, member.Type))
 		}
 		t.writeCode("    return size")
 		t.writeCode("}")
 	}
 }
 
-func (t *CodeGenerator) calcNotArrayMemberSize(name string, goType string) {
+func calcNotArrayMemberSize(name string, goType string) string {
 	var code string
 
 	switch goType {
 	case "string":
-		code = fmt.Sprintf("    size += chain.PackedVarUint32Length(uint32(len(t.%s))) + len(t.%s)", name, name)
+		code = fmt.Sprintf("size += chain.PackedVarUint32Length(uint32(len(t.%s))) + len(t.%s)", name, name)
 	case "byte":
-		code = "    size += 1"
+		code = "size += 1"
 	case "bool":
-		code = "    size += 1"
+		code = "size += 1"
 	case "int8":
-		code = "    size += 1"
+		code = "size += 1"
 	case "uint8":
-		code = "    size += 1"
+		code = "size += 1"
 	case "int16":
-		code = "    size += 2"
+		code = "size += 2"
 	case "uint16":
-		code = "    size += 2"
+		code = "size += 2"
 	case "int":
-		code = "    size += 4"
+		code = "size += 4"
 	case "int32":
-		code = "    size += 4"
+		code = "size += 4"
 	case "uint32":
-		code = "    size += 4"
+		code = "size += 4"
 	case "int64":
-		code = "    size += 8"
+		code = "size += 8"
 	case "uint64":
-		code = "    size += 8"
+		code = "size += 8"
 	case "chain.Int128":
-		code = "    size += 16"
+		code = "size += 16"
 	case "chain.Uint128":
-		code = "    size += 16"
+		code = "size += 16"
 	case "chain.Uint256":
-		code = "    size += 32"
+		code = "size += 32"
 	case "float32":
-		code = "    size += 4"
+		code = "size += 4"
 	case "float64":
-		code = "    size += 8"
+		code = "size += 8"
 	case "chain.Name":
-		code = "    size += 8"
+		code = "size += 8"
 	case "chain.Signature":
-		code = fmt.Sprintf("    size += t.%s.Size()", name)
+		code = fmt.Sprintf("size += t.%s.Size()", name)
 	case "chain.PublicKey":
-		code = fmt.Sprintf("    size += t.%s.Size()", name)
+		code = fmt.Sprintf("size += t.%s.Size()", name)
 	case "chain.Symbol":
-		code = "    size += 8"
+		code = "size += 8"
 	default:
 		code = fmt.Sprintf("	size += t.%[1]s.Size()", name)
 	}
-	t.writeCode(code + " //" + name)
+	return code + " //" + name
 }
 
-func (t *CodeGenerator) calcArrayMemberSize(name string, goType string) {
+func calcArrayMemberSize(name string, goType string) string {
 	switch goType {
 	case "byte":
-		t.writeCode("    size += len(t.%s)", name)
+		return fmt.Sprintf("size += len(t.%s)", name)
 	case "[]byte":
-		t.writeCode(`	for i := range t.%[1]s {
+		return fmt.Sprintf(`for i := range t.%[1]s {
 	size += chain.PackedVarUint32Length(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
 }`, name)
 	case "string":
-		t.writeCode(`    for i := range t.%[1]s {
+		return fmt.Sprintf(`for i := range t.%[1]s {
 	 size += chain.PackedVarUint32Length(uint32(len(t.%[1]s[i]))) + len(t.%[1]s[i])
 }`, name)
 	case "bool":
-		t.writeCode("    size += len(t.%s)", name)
+		return fmt.Sprintf("size += len(t.%s)", name)
 	case "int8":
-		t.writeCode("    size += len(t.%s)", name)
+		return fmt.Sprintf("size += len(t.%s)", name)
 	case "uint8":
-		t.writeCode("    size += len(t.%s)", name)
+		return fmt.Sprintf("size += len(t.%s)", name)
 	case "int16":
-		t.writeCode("    size += len(t.%s)*2", name)
+		return fmt.Sprintf("size += len(t.%s)*2", name)
 	case "uint16":
-		t.writeCode("    size += len(t.%s)*2", name)
+		return fmt.Sprintf("size += len(t.%s)*2", name)
 	case "int":
-		t.writeCode("    size += len(t.%s)*4", name)
+		return fmt.Sprintf("size += len(t.%s)*4", name)
 	case "int32":
-		t.writeCode("    size += len(t.%s)*4", name)
+		return fmt.Sprintf("size += len(t.%s)*4", name)
 	case "uint32":
-		t.writeCode("    size += len(t.%s)*4", name)
+		return fmt.Sprintf("size += len(t.%s)*4", name)
 	case "int64":
-		t.writeCode("    size += len(t.%s)*8", name)
+		return fmt.Sprintf("size += len(t.%s)*8", name)
 	case "uint64":
-		t.writeCode("    size += len(t.%s)*8", name)
+		return fmt.Sprintf("size += len(t.%s)*8", name)
 	case "chain.Uint128":
-		t.writeCode("    size += len(t.%s)*16", name)
+		return fmt.Sprintf("size += len(t.%s)*16", name)
 	case "chain.Uint256":
-		t.writeCode("    size += len(t.%s)*32", name)
+		return fmt.Sprintf("size += len(t.%s)*32", name)
 	case "float32":
-		t.writeCode("    size += len(t.%s)*4", name)
+		return fmt.Sprintf("size += len(t.%s)*4", name)
 	case "float64":
-		t.writeCode("    size += len(t.%s)*8", name)
+		return fmt.Sprintf("size += len(t.%s)*8", name)
 	case "chain.Name":
-		t.writeCode("    size += len(t.%s)*8", name)
+		return fmt.Sprintf("size += len(t.%s)*8", name)
 	default:
-		t.writeCode(`
+		return fmt.Sprintf(`
     for i := range t.%[1]s {
         size += t.%[1]s[i].Size()
     }`, name)
 	}
-}
-
-func (t *CodeGenerator) genSizeCode(structName string, members []StructMember) {
-	t.writeCode("func (t *%s) Size() int {", structName)
-	t.writeCode("    size := 0")
-	for _, member := range members {
-		if member.LeadingType == TYPE_SLICE {
-			t.writeCode("    size += chain.PackedVarUint32Length(uint32(len(t.%s)))", member.Name)
-			t.calcArrayMemberSize(member.Name, member.Type)
-		} else if member.LeadingType == TYPE_ARRAY {
-			t.writeCode("    for i := range t.%s {", member.Name)
-			t.calcNotArrayMemberSize(member.Name+"[i]", member.Type)
-			t.writeCode("    }")
-		} else {
-			t.calcNotArrayMemberSize(member.Name, member.Type)
-		}
-	}
-	t.writeCode("    return size")
-	t.writeCode("}")
 }
 
 func GetIndexType(index string) string {
@@ -1555,25 +1688,23 @@ func (t *CodeGenerator) GenCode() error {
 
 	for _, action := range t.actions {
 		t.genStruct(action.ActionName, action.Members)
-		t.genPackCode(action.ActionName, action.Members)
-		t.genUnpackCode(action.ActionName, action.Members)
-		t.genSizeCode(action.ActionName, action.Members)
+		t.genPackUnpackCode(action.ActionName, action.Members)
 	}
 
 	for _, _struct := range t.abiStructsMap {
-		t.genPackCode(_struct.StructName, _struct.Members)
-		t.genUnpackCode(_struct.StructName, _struct.Members)
-		t.genSizeCode(_struct.StructName, _struct.Members)
+		t.genPackUnpackCode(_struct.StructName, _struct.Members)
 	}
 
 	for _, _struct := range t.PackerMap {
-		t.genPackCode(_struct.StructName, _struct.Members)
-		t.genUnpackCode(_struct.StructName, _struct.Members)
-		t.genSizeCode(_struct.StructName, _struct.Members)
+		t.genPackUnpackCode(_struct.StructName, _struct.Members)
+	}
+
+	for _, _struct := range t.VariantMap {
+		t.genPackUnpackCodeForVariant(_struct.StructName, _struct.Members)
 	}
 
 	for i := range t.structs {
-		table := &t.structs[i]
+		table := t.structs[i]
 		if table.TableName == "" {
 			continue
 		}
@@ -1623,7 +1754,6 @@ func (t *CodeGenerator) GenCode() error {
 	t.writeCode("    if receiver != firstReceiver {")
 	t.GenNotifyCode()
 	t.writeCode("    }")
-	t.writeCode("    chain.Finish()")
 	t.writeCode("}")
 	return nil
 }
@@ -1649,7 +1779,7 @@ func (t *CodeGenerator) GenAbi() error {
 	abi.Actions = []ABIAction{}
 	abi.Tables = []ABITable{}
 	abi.RicardianClauses = []string{}
-	abi.Variants = []string{}
+	abi.Variants = []VariantDef{}
 	abi.AbiExtensions = []string{}
 	abi.ErrorMessages = []string{}
 
@@ -1708,6 +1838,23 @@ func (t *CodeGenerator) GenAbi() error {
 		abiTable.KeyNames = []string{}
 		abiTable.KeyTypes = []string{}
 		abi.Tables = append(abi.Tables, abiTable)
+	}
+
+	for _, variant := range t.VariantMap {
+		// type VariantDef struct {
+		// 	Name  string   `json:"name"`
+		// 	Types []string `json:"types"`
+		// }
+		v := VariantDef{}
+		v.Name = variant.StructName
+		for _, member := range variant.Members {
+			tp, err := t.convertType(member)
+			if err != nil {
+				return err
+			}
+			v.Types = append(v.Types, tp)
+		}
+		abi.Variants = append(abi.Variants, v)
 	}
 
 	sort.Slice(abi.Structs, func(i, j int) bool {
@@ -1799,7 +1946,7 @@ func (t *CodeGenerator) addAbiStruct(s *StructInfo) {
 
 func (t *CodeGenerator) Analyse() {
 	for i := range t.structs {
-		s := &t.structs[i]
+		s := t.structs[i]
 		t.structMap[s.StructName] = s
 	}
 
@@ -1813,7 +1960,7 @@ func (t *CodeGenerator) Analyse() {
 	}
 
 	for i := range t.structs {
-		item := &t.structs[i]
+		item := t.structs[i]
 		if item.TableName == "" {
 			continue
 		}

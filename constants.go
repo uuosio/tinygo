@@ -403,3 +403,70 @@ func (t *{{.StructName}}) SetSecondaryValue(index int, v interface{}) {
 	}
 }
 `
+
+const cSerializerTemplate = `
+func (t *{{.StructName}}) Pack() []byte {
+    enc := chain.NewEncoder(t.Size())
+	{{- range $i, $member := .Members}}
+	{{$member.PackMember}}
+	{{- end}}
+    return enc.GetBytes()
+}
+
+func (t *{{.StructName}}) Unpack(data []byte) int {
+    dec := chain.NewDecoder(data)
+	{{- range $i, $member := .Members}}
+	{{$member.UnpackMember}}
+	{{- end}}
+    return dec.Pos()
+}
+
+func (t *{{.StructName}}) Size() int {
+    size := 0
+	{{- range $i, $member := .Members}}
+	{{$member.GetSize}}
+	{{- end}}
+    return size
+}
+`
+
+const cVariantTemplate = `
+func (t *{{.StructName}}) Pack() []byte {
+    enc := chain.NewEncoder(t.Size())
+	{{- range $i, $member := .Members}}
+	if _, ok := t.value.(*{{$member.Type}}); ok {
+		enc.PackUint8(uint8({{$i}}))
+		enc.Pack(t.value)
+		return enc.GetBytes()
+	}
+	{{- end}}
+    return enc.GetBytes()
+}
+
+func (t *{{.StructName}}) Unpack(data []byte) int {
+    dec := chain.NewDecoder(data)
+	tp := dec.UnpackUint8()
+	{{- range $i, $member := .Members}}
+	if tp == uint8({{$i}}) {
+		type A struct {
+			value {{$member.Type}}
+		}
+		a := &A{}
+		dec.Unpack(&a.value)
+		t.value = &a.value
+	}
+	{{- end}}
+    return dec.Pos()
+}
+
+func (t *{{.StructName}}) Size() int {
+    size := 1
+	{{- range $i, $member := .Members}}
+	if _, ok := t.value.({{$member.Type}}); ok {
+		{{$member.GetVariantSize}}
+		return size
+	}
+	{{- end}}
+    return size
+}
+`
