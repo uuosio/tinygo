@@ -13,7 +13,10 @@ type NotAPacker struct {
 
 //packer
 type GenPackUnpack struct {
-	value chain.Checksum256
+	a1 uint64
+	a2 chain.Checksum256
+	a3 []uint64
+	a4 []chain.Checksum256
 }
 
 //table mysingleton singleton
@@ -25,6 +28,11 @@ type Singleton struct {
 //table Mytable
 // type MyData2 struct {
 // }
+
+//variant uint64 chain.Uint128
+type MyVariant struct {
+	value interface{}
+}
 
 //table mytable
 type MyData struct {
@@ -64,6 +72,11 @@ type MyContract struct {
 
 func NewContract(receiver, firstReceiver, action chain.Name) *MyContract {
 	return &MyContract{receiver, firstReceiver, action}
+}
+
+//action testvariant
+func (c *MyContract) TestVariant(v MyVariant) {
+	logger.Println("Hello", v.value.(uint64))
 }
 
 //action sayhello
