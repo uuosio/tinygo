@@ -282,8 +282,8 @@ func (s StructMember) UnpackMember() string {
 
 func (s StructMember) GetSize() string {
 	if s.IsSlice() {
-		code := fmt.Sprintf("    size += chain.PackedVarUint32Length(uint32(len(t.%s)))\n", s.Name)
-		return code + calcArrayMemberSize(s.Name, s.Type)
+		code := fmt.Sprintf("size += chain.PackedVarUint32Length(uint32(len(t.%s)))\n", s.Name)
+		return code + "    " + calcArrayMemberSize(s.Name, s.Type)
 	} else {
 		return calcNotArrayMemberSize(s.Name, s.Type)
 	}
