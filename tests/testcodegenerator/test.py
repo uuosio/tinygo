@@ -4,13 +4,11 @@ import json
 import time
 from inspect import currentframe, getframeinfo
 
-from uuoskit import wasmcompiler
-
 test_dir = os.path.dirname(__file__)
 sys.path.append(os.path.join(test_dir, '..'))
 
-from uuosio import log
-from uuosio.chaintester import ChainTester
+from ipyeos import log
+from ipyeos.chaintester import ChainTester
 
 logger = log.get_logger(__name__)
 
@@ -134,6 +132,20 @@ class Test(object):
         self.chain.deploy_contract('hello', code, abi, 0)
         try:
             r = self.chain.push_action('hello', 'testmath', b'')
+            # r = self.chain.push_action('hello', 'sayhello', b'hello,world')
+            print_console(r)
+        except Exception as e:
+            print_except(e.args[0])
+
+    def test_variant(self):
+        with open('test.wasm', 'rb') as f:
+            code = f.read()
+        with open('test.abi', 'r') as f:
+            abi = f.read()
+
+        self.chain.deploy_contract('hello', code, abi, 0)
+        try:
+            r = self.chain.push_action('hello', 'testvariant', b'')
             # r = self.chain.push_action('hello', 'sayhello', b'hello,world')
             print_console(r)
         except Exception as e:

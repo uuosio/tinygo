@@ -1,11 +1,10 @@
-eosio-cpp -o test-cpp.wasm cpp/test.cpp
-if [ $? -ne 0 ]; then
-    echo "build cpp failed"
-    exit $?
-fi
+# eosio-cpp -o test-cpp.wasm cpp/test.cpp
+# if [ $? -ne 0 ]; then
+#     echo "build cpp failed"
+#     exit $?
+# fi
 
-eosio-wasm2wast test.wasm -o test.wast
-
+# eosio-wasm2wast test.wasm -o test.wast
 
 eosio-go build -o test.wasm .
 if [ $? -ne 0 ]; then
@@ -14,7 +13,7 @@ if [ $? -ne 0 ]; then
 fi
 
 if [ -z "$1" ]; then
-run-uuos -m pytest -x -s test.py
+run-ipyeos -m pytest -x -s test.py
 else
-run-uuos -m pytest -x -s test.py -k $1
+run-ipyeos -m pytest -x -s test.py -k $1
 fi
