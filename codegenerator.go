@@ -107,8 +107,15 @@ type SpecialAbiType struct {
 }
 
 type StructInfo struct {
-	StructName       string
-	Members          []StructMember
+	StructName    string
+	Members       []StructMember
+	PackageName   string
+	IgnoreFromABI bool
+	Comment       string
+}
+
+type TableInfo struct {
+	StructInfo       StructInfo
 	PackageName      string
 	TableName        string
 	RawTableName     uint64
@@ -127,6 +134,7 @@ type CodeGenerator struct {
 	codeFile        *os.File
 	actions         []ActionInfo
 	structs         []*StructInfo
+	tables          []*TableInfo
 	specialAbiTypes []SpecialAbiType
 	structMap       map[string]*StructInfo
 
@@ -462,7 +470,7 @@ func parseType(field *ast.Field) (string, int) {
 	}
 }
 
-func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberList *[]StructMember, isStructField bool, ignore bool) error {
+func (t *CodeGenerator) parseField(field *ast.Field, memberList *[]StructMember, isStructField bool, ignore bool) error {
 	if ignore {
 		_, ok := field.Type.(*ast.StarExpr)
 		if !ok {
@@ -475,8 +483,7 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 	}
 
 	if field.Names == nil {
-		errMsg := fmt.Sprintf("anoymous type unsupported")
-		return t.newError(field.Pos(), errMsg)
+		return nil
 	}
 
 	for _, name := range field.Names {
@@ -568,37 +575,51 @@ const (
 	STRUCT_TYPE_TABLE
 	STRUCT_TYPE_PACKER
 	STRUCT_TYPE_VARIANT
+	STRUCT_TYPE_OPTIONAL
+	STRUCT_TYPE_BINARYEXTENTION
 )
 
-type StructType int
+type ABIType int
 
-func NewStructType(s string) StructType {
+func NewABIType(s string) ABIType {
 	if s == "//table" {
-		return StructType(STRUCT_TYPE_TABLE)
+		return ABIType(STRUCT_TYPE_TABLE)
 	} else if s == "//packer" {
-		return StructType(STRUCT_TYPE_PACKER)
+		return ABIType(STRUCT_TYPE_PACKER)
 	} else if s == "//variant" {
-		return StructType(STRUCT_TYPE_VARIANT)
+		return ABIType(STRUCT_TYPE_VARIANT)
+	} else if s == "//optional" {
+		return ABIType(STRUCT_TYPE_OPTIONAL)
+	} else if s == "//binaryextention" {
+		return ABIType(STRUCT_TYPE_BINARYEXTENTION)
 	} else if s == "//contract" {
-		return StructType(STRUCT_TYPE_VARIANT)
+		return ABIType(STRUCT_TYPE_VARIANT)
 	} else {
-		return StructType(STRUCT_TYPE_UNKNOWN)
+		return ABIType(STRUCT_TYPE_UNKNOWN)
 	}
 }
 
-func (t StructType) IsTable() bool {
+func (t ABIType) IsTable() bool {
 	return int(t) == STRUCT_TYPE_TABLE
 }
 
-func (t StructType) IsPacker() bool {
+func (t ABIType) IsPacker() bool {
 	return int(t) == STRUCT_TYPE_PACKER
 }
 
-func (t StructType) IsVariant() bool {
+func (t ABIType) IsVariant() bool {
 	return int(t) == STRUCT_TYPE_VARIANT
 }
 
-func (t StructType) IsUnknown() bool {
+func (t ABIType) IsOptional() bool {
+	return int(t) == STRUCT_TYPE_OPTIONAL
+}
+
+func (t ABIType) IsBinaryExtention() bool {
+	return int(t) == STRUCT_TYPE_BINARYEXTENTION
+}
+
+func (t ABIType) IsUnknown() bool {
 	return int(t) == STRUCT_TYPE_UNKNOWN
 }
 
@@ -614,12 +635,151 @@ func isPrimitiveType(tp ast.Expr) bool {
 	return false
 }
 
-func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
-	if v.Tok != token.TYPE {
+func (t *CodeGenerator) parseTableIndex(field *ast.Field, info *TableInfo) error {
+	comment := field.Comment.List[0]
+	indexText := comment.Text
+	indexInfo := splitAndTrimSpace(comment.Text, ":")
+	//parse comment like://primary:t.primary
+	if len(indexInfo) <= 1 {
 		return nil
 	}
 
-	if t.parseSpecialAbiType(packageName, v) {
+	dbType := indexInfo[0]
+	if dbType == "//primary" {
+		if info.Singleton {
+			errMsg := fmt.Sprintf("Singleton table `%s` can not define primary key explicitly", info.TableName)
+			return t.newError(comment.Pos(), errMsg)
+		}
+		if len(indexInfo) == 2 {
+			primary := indexInfo[1]
+			if primary == "" {
+				return t.newError(comment.Pos(), "Empty primary key in struct "+info.StructInfo.StructName)
+			}
+
+			if info.PrimaryKey != "" {
+				return t.newError(comment.Pos(), "Duplicated primary key in struct "+info.StructInfo.StructName)
+			}
+			info.PrimaryKey = primary
+		} else {
+			errMsg := fmt.Sprintf("Invalid primary key in struct %s: %s", info.StructInfo.StructName, indexText)
+			return t.newError(comment.Pos(), errMsg)
+		}
+	} else if _, ok := t.indexTypeMap[dbType[2:]]; ok {
+		if info.Singleton {
+			errMsg := fmt.Sprintf("Singleton table `%s` can not define secondary key explictly", info.TableName)
+			return t.newError(comment.Pos(), errMsg)
+		}
+		if len(indexInfo) != 4 {
+			errMsg := fmt.Sprintf("Invalid index DB in struct %s: %s", info.StructInfo.StructName, indexText)
+			return t.newError(comment.Pos(), errMsg)
+		}
+
+		idx := dbType[2:]
+		name := indexInfo[1]
+		if name == "" {
+			return t.newError(comment.Pos(), "Invalid name in: "+indexText)
+		}
+
+		for i := range info.SecondaryIndexes {
+			if info.SecondaryIndexes[i].Name == name {
+				errMsg := fmt.Sprintf("Duplicated index name %s in %s", name, indexText)
+				return t.newError(comment.Pos(), errMsg)
+			}
+		}
+
+		getter := indexInfo[2]
+		if getter == "" {
+			return t.newError(comment.Pos(), "Invalid getter in: "+indexText)
+		}
+
+		setter := indexInfo[3]
+		if setter == "" {
+			return t.newError(comment.Pos(), "Invalid setter in: "+indexText)
+		}
+
+		dbType := indexTypeToSecondaryDBName(idx)
+		indexInfo := SecondaryIndexInfo{idx, dbType, name, getter, setter}
+		info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
+	}
+	return nil
+}
+
+func (t *CodeGenerator) parseTableStruct(packageName string, declare *ast.GenDecl, doc string) error {
+	parts := strings.Fields(doc)
+	if parts[0] != "//table" {
+		return t.newError(declare.Pos(), "not a table struct")
+	}
+	if !(len(parts) >= 2 && len(parts) <= 4) {
+		return t.newError(declare.Pos(), "Invalid table")
+	}
+
+	info := &TableInfo{}
+	tableName := parts[1]
+	if !IsNameValid(tableName) {
+		return t.newError(declare.Pos(), "Invalid table name:"+tableName)
+	}
+
+	info.TableName = tableName
+	info.RawTableName = StringToName(tableName)
+	attrs := parts[2:]
+	for _, attr := range attrs {
+		if attr == "singleton" {
+			if info.Singleton {
+				return t.newError(declare.Pos(), "Duplicate singleton attribute")
+			}
+			info.Singleton = true
+		} else if attr == "ignore" {
+			if info.IgnoreFromABI {
+				return t.newError(declare.Pos(), "Duplicate ingore attribute")
+			}
+			info.IgnoreFromABI = true
+			info.StructInfo.IgnoreFromABI = true
+		}
+	}
+
+	v := declare.Specs[0].(*ast.TypeSpec)
+	info.StructInfo.StructName = v.Name.Name
+
+	vv, ok := v.Type.(*ast.StructType)
+	if !ok {
+		return nil
+	}
+
+	for _, field := range vv.Fields.List {
+		// switch field.Type.(type) {
+		// case *ast.StarExpr:
+		// 	err := t.newError(field.Pos(), "packer or table struct does not support pointer type!")
+		// 	return err
+		// }
+		err := t.parseField(field, &info.StructInfo.Members, true, false)
+		if err != nil {
+			return err
+		}
+
+		if field.Comment == nil {
+			continue
+		}
+
+		err = t.parseTableIndex(field, info)
+		if err != nil {
+			return err
+		}
+	}
+
+	t.tables = append(t.tables, info)
+	return nil
+}
+
+func (t *CodeGenerator) parseStruct(packageName string, declare *ast.GenDecl) error {
+	if declare.Tok != token.TYPE {
+		return nil
+	}
+
+	if len(declare.Specs) == 0 {
+		return nil
+	}
+
+	if t.parseSpecialAbiType(packageName, declare) {
 		return nil
 	}
 
@@ -628,39 +788,17 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 	isContractStruct := false
 	var lastLineDoc string
 
-	structType := NewStructType("")
-	if v.Doc != nil {
-		n := len(v.Doc.List)
-		doc := v.Doc.List[n-1]
+	structType := NewABIType("")
+	if declare.Doc != nil {
+		n := len(declare.Doc.List)
+		doc := declare.Doc.List[n-1]
 		lastLineDoc = strings.TrimSpace(doc.Text)
 		if strings.HasPrefix(lastLineDoc, "//table") {
-			structType = NewStructType("//table")
+			structType = NewABIType("//table")
 			//items := Split(lastLineDoc)
-			parts := strings.Fields(lastLineDoc)
-			if parts[0] == "//table" && (len(parts) >= 2 && len(parts) <= 4) {
-				tableName := parts[1]
-				if !IsNameValid(tableName) {
-					return t.newError(doc.Pos(), "Invalid table name:"+tableName)
-				}
-				info.TableName = tableName
-				info.RawTableName = StringToName(tableName)
-				attrs := parts[2:]
-				for _, attr := range attrs {
-					if attr == "singleton" {
-						if info.Singleton {
-							return t.newError(doc.Pos(), "Duplicate singleton attribute")
-						}
-						info.Singleton = true
-					} else if attr == "ignore" {
-						if info.IgnoreFromABI {
-							return t.newError(doc.Pos(), "Duplicate ingore attribute")
-						}
-						info.IgnoreFromABI = true
-					}
-				}
-			}
+			return t.parseTableStruct(packageName, declare, lastLineDoc)
 		} else if strings.HasPrefix(lastLineDoc, "//contract") {
-			structType = NewStructType("//contract")
+			structType = NewABIType("//contract")
 			parts := strings.Fields(lastLineDoc)
 			if len(parts) == 2 {
 				name := parts[1]
@@ -672,7 +810,7 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				isContractStruct = true
 			}
 		} else if strings.HasPrefix(lastLineDoc, "//variant") {
-			structType = NewStructType("//variant")
+			structType = NewABIType("//variant")
 			parts := strings.Fields(lastLineDoc)
 			partMap := make(map[string]bool)
 			for i := range parts {
@@ -690,123 +828,48 @@ func (t *CodeGenerator) parseStruct(packageName string, v *ast.GenDecl) error {
 				member.Pos = doc.Pos()
 				info.Members = append(info.Members, member)
 			}
+		} else if strings.HasPrefix(lastLineDoc, "//optional") {
+			structType = NewABIType("//optional")
+		} else if strings.HasPrefix(lastLineDoc, "//binaryextention") {
+			structType = NewABIType("//binaryextention")
 		} else {
-			structType = NewStructType("lastLineDoc")
+			structType = NewABIType("lastLineDoc")
 		}
 	}
 
-	for _, spec := range v.Specs {
-		v := spec.(*ast.TypeSpec)
-		name := v.Name.Name
-		if isContractStruct {
-			t.contractStructName = name
-			//Do not add contract struct to struct list
-			return nil
+	v := declare.Specs[0].(*ast.TypeSpec)
+	info.StructName = v.Name.Name
+	if isContractStruct {
+		t.contractStructName = info.StructName
+		//Do not add contract struct to struct list
+		return nil
+	}
+
+	vv, ok := v.Type.(*ast.StructType)
+	if !ok {
+		return nil
+	}
+
+	if structType.IsVariant() {
+		t.VariantMap[info.StructName] = &info
+		return nil
+	}
+
+	for _, field := range vv.Fields.List {
+		// switch field.Type.(type) {
+		// case *ast.StarExpr:
+		// 	err := t.newError(field.Pos(), "packer or table struct does not support pointer type!")
+		// 	return err
+		// }
+		err := t.parseField(field, &info.Members, true, false)
+		if err != nil {
+			return err
 		}
+	}
 
-		vv, ok := v.Type.(*ast.StructType)
-		if !ok {
-			continue
-		}
-
-		info.StructName = name
-		if structType.IsVariant() {
-			t.VariantMap[info.StructName] = &info
-			continue
-		}
-
-		for _, field := range vv.Fields.List {
-			//*ast.FuncType *ast.Ident
-			//TODO panic on FuncType
-			switch field.Type.(type) {
-			case *ast.StarExpr:
-				err := t.newError(field.Pos(), "packer or table struct does not support pointer type!")
-				return err
-			}
-			err := t.parseField(name, field, &info.Members, true, false)
-			if err != nil {
-				return err
-			}
-
-			if info.TableName == "" {
-				continue
-			}
-
-			if field.Comment == nil {
-				continue
-			}
-
-			comment := field.Comment.List[0]
-			indexText := comment.Text
-			indexInfo := splitAndTrimSpace(comment.Text, ":")
-			//parse comment like://primary:t.primary
-			if len(indexInfo) <= 1 {
-				continue
-			}
-
-			dbType := indexInfo[0]
-			if dbType == "//primary" {
-				if info.Singleton {
-					errMsg := fmt.Sprintf("Singleton table `%s` can not define primary key explicitly", info.TableName)
-					return t.newError(comment.Pos(), errMsg)
-				}
-				if len(indexInfo) == 2 {
-					primary := indexInfo[1]
-					if primary == "" {
-						return t.newError(comment.Pos(), "Empty primary key in struct "+name)
-					}
-
-					if info.PrimaryKey != "" {
-						return t.newError(comment.Pos(), "Duplicated primary key in struct "+name)
-					}
-					info.PrimaryKey = primary
-				} else {
-					errMsg := fmt.Sprintf("Invalid primary key in struct %s: %s", name, indexText)
-					return t.newError(comment.Pos(), errMsg)
-				}
-			} else if _, ok := t.indexTypeMap[dbType[2:]]; ok {
-				if info.Singleton {
-					errMsg := fmt.Sprintf("Singleton table `%s` can not define secondary key explictly", info.TableName)
-					return t.newError(comment.Pos(), errMsg)
-				}
-				if len(indexInfo) != 4 {
-					errMsg := fmt.Sprintf("Invalid index DB in struct %s: %s", name, indexText)
-					return t.newError(comment.Pos(), errMsg)
-				}
-
-				idx := dbType[2:]
-				name := indexInfo[1]
-				if name == "" {
-					return t.newError(comment.Pos(), "Invalid name in: "+indexText)
-				}
-
-				for i := range info.SecondaryIndexes {
-					if info.SecondaryIndexes[i].Name == name {
-						errMsg := fmt.Sprintf("Duplicated index name %s in %s", name, indexText)
-						return t.newError(comment.Pos(), errMsg)
-					}
-				}
-
-				getter := indexInfo[2]
-				if getter == "" {
-					return t.newError(comment.Pos(), "Invalid getter in: "+indexText)
-				}
-
-				setter := indexInfo[3]
-				if setter == "" {
-					return t.newError(comment.Pos(), "Invalid setter in: "+indexText)
-				}
-
-				dbType := indexTypeToSecondaryDBName(idx)
-				indexInfo := SecondaryIndexInfo{idx, dbType, name, getter, setter}
-				info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
-			}
-		}
-
-		t.structs = append(t.structs, &info)
-		if strings.TrimSpace(lastLineDoc) == "//packer" {
-			t.PackerMap[info.StructName] = &info
-		}
+	t.structs = append(t.structs, &info)
+	if strings.TrimSpace(lastLineDoc) == "//packer" {
+		t.PackerMap[info.StructName] = &info
 	}
 	return nil
 }
@@ -888,7 +951,7 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	}
 
 	for _, v := range f.Type.Params.List {
-		err := t.parseField(f.Name.Name, v, &action.Members, false, ignore)
+		err := t.parseField(v, &action.Members, false, ignore)
 		if err != nil {
 			return err
 		}
@@ -1279,32 +1342,29 @@ func (t *CodeGenerator) GenCode() error {
 		t.genPackUnpackCodeForVariant(_struct.StructName, _struct.Members)
 	}
 
-	for i := range t.structs {
-		table := t.structs[i]
-		if table.TableName == "" {
-			continue
-		}
+	for i := range t.tables {
+		table := t.tables[i]
 
-		t.writeCodeEx(cStructTemplate, table)
+		t.writeCodeEx(cTableTemplate, table)
 
 		//generate singleton db code
 		if table.Singleton {
-			n := NewTableTemplate(table.StructName, table.TableName, table.SecondaryIndexes)
+			n := NewTableTemplate(table.StructInfo.StructName, table.TableName, table.SecondaryIndexes)
 			t.writeCodeEx(cSingletonCode, n)
 			// t.writeCode(cSingletonCode, table.StructName, StringToName(table.TableName))
 			continue
 		}
 
 		if table.PrimaryKey != "" {
-			t.writeCode("func (t *%s) GetPrimary() uint64 {", table.StructName)
+			t.writeCode("func (t *%s) GetPrimary() uint64 {", table.StructInfo.StructName)
 			t.writeCode("    return %s", table.PrimaryKey)
 			t.writeCode("}")
 		}
 
-		t.writeCodeEx(cDBTemplate, table)
+		t.writeCodeEx(cDBTemplate, &table.StructInfo)
 		// t.writeCode(cDBTemplate, table.StructName, StringToName(table.TableName), table.TableName)
 
-		n := NewTableTemplate(table.StructName, table.TableName, table.SecondaryIndexes)
+		n := NewTableTemplate(table.StructInfo.StructName, table.TableName, table.SecondaryIndexes)
 		t.writeCodeEx(cNewMultiIndexTemplate, n)
 	}
 
@@ -1403,13 +1463,14 @@ func (t *CodeGenerator) GenAbi() error {
 		abi.Actions = append(abi.Actions, a)
 	}
 
-	for _, table := range t.abiStructsMap {
-		if table.TableName == "" || table.IgnoreFromABI {
+	for _, table := range t.tables {
+		if table.IgnoreFromABI {
 			continue
 		}
+
 		abiTable := ABITable{}
 		abiTable.Name = table.TableName
-		abiTable.Type = table.StructName
+		abiTable.Type = table.StructInfo.StructName
 		abiTable.IndexType = "i64"
 		abiTable.KeyNames = []string{}
 		abiTable.KeyTypes = []string{}
@@ -1526,6 +1587,11 @@ func (t *CodeGenerator) Analyse() {
 		t.structMap[s.StructName] = s
 	}
 
+	for i := range t.tables {
+		s := t.tables[i]
+		t.structMap[s.StructInfo.StructName] = &s.StructInfo
+	}
+
 	for _, action := range t.actions {
 		for _, member := range action.Members {
 			item, ok := t.structMap[member.Type]
@@ -1535,12 +1601,9 @@ func (t *CodeGenerator) Analyse() {
 		}
 	}
 
-	for i := range t.structs {
-		item := t.structs[i]
-		if item.TableName == "" {
-			continue
-		}
-		t.addAbiStruct(item)
+	for i := range t.tables {
+		item := t.tables[i]
+		t.addAbiStruct(&item.StructInfo)
 	}
 }
 

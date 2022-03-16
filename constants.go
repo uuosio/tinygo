@@ -355,16 +355,16 @@ print(r['processed']['action_traces'][0]['console'])
 
 const cReadMe = "# Building\n\n```bash\neosio-go build -o %[1]s.wasm .\n```\n\n# Testing\n```\npython3 test.py\n```"
 
-const cStructTemplate = `
+const cTableTemplate = `
 var (
-	{{.StructName}}SecondaryTypes = []int{
+	{{.StructInfo.StructName}}SecondaryTypes = []int{
 	{{- range $i, $val := .SecondaryIndexes}}
 		database.{{$val.Type}},
 	{{- end}}
 	}
 )
 
-func {{.StructName}}DBNameToIndex(indexName string) int {
+func {{.StructInfo.StructName}}DBNameToIndex(indexName string) int {
 	switch indexName {
 	{{- range $i, $val := .SecondaryIndexes}}
 		case "{{$val.Name}}":
@@ -375,13 +375,13 @@ func {{.StructName}}DBNameToIndex(indexName string) int {
 	}
 }
 
-func {{.StructName}}Unpacker(buf []byte) database.MultiIndexValue {
-	v := &{{.StructName}}{}
+func {{.StructInfo.StructName}}Unpacker(buf []byte) database.MultiIndexValue {
+	v := &{{.StructInfo.StructName}}{}
 	v.Unpack(buf)
 	return v
 }
 
-func (t *{{.StructName}}) GetSecondaryValue(index int) interface{} {
+func (t *{{.StructInfo.StructName}}) GetSecondaryValue(index int) interface{} {
 	switch index {
 	{{- range $i, $val := .SecondaryIndexes}}
 		case {{$i}}:
@@ -392,7 +392,7 @@ func (t *{{.StructName}}) GetSecondaryValue(index int) interface{} {
 	}
 }
 
-func (t *{{.StructName}}) SetSecondaryValue(index int, v interface{}) {
+func (t *{{.StructInfo.StructName}}) SetSecondaryValue(index int, v interface{}) {
 	switch index {
 		{{- range $i, $val := .SecondaryIndexes}}
 	case {{$i}}:
