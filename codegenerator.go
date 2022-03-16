@@ -247,6 +247,13 @@ func (t *StructMember) PackMember() string {
 		panic(err)
 	}
 
+	// if t.LeadingType == TYPE_UNSUPPORTED || t.LeadingType == TYPE_POINTER {
+	// 	color.Set(color.FgYellow)
+	// 	log.Printf("WARNING: unsupported type %s in %s ignored", t.Type, t.Name)
+	// 	color.Unset()
+	// 	return ""
+	// }
+
 	if t.IsSlice() {
 		code, err := packArrayType(t.Name, t.Type)
 		if err != nil {
@@ -258,17 +265,24 @@ func (t *StructMember) PackMember() string {
 	}
 }
 
-func (s StructMember) UnpackMember() string {
-	if s.Name == "" {
-		err := fmt.Errorf("anonymount Type does not supported currently: %s", s.Type)
+func (t *StructMember) UnpackMember() string {
+	if t.Name == "" {
+		err := fmt.Errorf("anonymount Type does not supported currently: %s", t.Type)
 		panic(err)
 	}
 
-	if s.IsSlice() {
-		if s.Type == "byte" {
-			return unpackType("UnpackBytes", fmt.Sprintf("t.%s", s.Name))
+	// if t.LeadingType == TYPE_UNSUPPORTED || t.LeadingType == TYPE_POINTER {
+	// 	color.Set(color.FgYellow)
+	// 	log.Printf("WARNING: unsupported type %s in %s ignored", t.Type, t.Name)
+	// 	color.Unset()
+	// 	return ""
+	// }
+
+	if t.IsSlice() {
+		if t.Type == "byte" {
+			return unpackType("UnpackBytes", fmt.Sprintf("t.%s", t.Name))
 		} else {
-			unpackCode := s.unpackBaseType()
+			unpackCode := t.unpackBaseType()
 			return fmt.Sprintf(`
 	{
 		length := dec.UnpackLength()
@@ -276,10 +290,10 @@ func (s StructMember) UnpackMember() string {
 		for i:=0; i<length; i++ {
 		%s
 		}
-	}`, s.Name, s.Type, unpackCode)
+	}`, t.Name, t.Type, unpackCode)
 		}
 	} else {
-		return s.unpackBaseType()
+		return t.unpackBaseType()
 	}
 }
 
@@ -406,11 +420,11 @@ func (t *CodeGenerator) newError(p token.Pos, format string, args ...interface{}
 }
 
 func parseType(field *ast.Field) (string, int) {
-	leadingType := TYPE_UNSUPPORTED
 	switch fieldType := field.Type.(type) {
 	case *ast.Ident:
 		return fieldType.Name, TYPE_NORMAL
 	case *ast.ArrayType:
+		leadingType := TYPE_UNSUPPORTED
 		if fieldType.Len != nil {
 			leadingType = TYPE_UNSUPPORTED
 		} else {
@@ -428,7 +442,7 @@ func parseType(field *ast.Field) (string, int) {
 		}
 	case *ast.SelectorExpr:
 		ident := fieldType.X.(*ast.Ident)
-		return ident.Name + "." + fieldType.Sel.Name, leadingType
+		return ident.Name + "." + fieldType.Sel.Name, TYPE_NORMAL
 	case *ast.StarExpr:
 		switch v2 := fieldType.X.(type) {
 		case *ast.Ident:
@@ -1235,14 +1249,29 @@ func (t *CodeGenerator) GenCode() error {
 
 	for _, action := range t.actions {
 		t.genStruct(action.ActionName, action.Members)
+		for _, v := range action.Members {
+			if v.LeadingType == TYPE_UNSUPPORTED {
+				return t.newError(v.Pos, "unsupported type %s in %s", v.Type, action.ActionName)
+			}
+		}
 		t.genPackUnpackCode(action.ActionName, action.Members)
 	}
 
 	for _, _struct := range t.abiStructsMap {
+		for _, v := range _struct.Members {
+			if v.LeadingType == TYPE_UNSUPPORTED || v.LeadingType == TYPE_POINTER {
+				return t.newError(v.Pos, "unsupported type %s in %s", v.Type, _struct.StructName)
+			}
+		}
 		t.genPackUnpackCode(_struct.StructName, _struct.Members)
 	}
 
 	for _, _struct := range t.PackerMap {
+		for _, v := range _struct.Members {
+			if v.LeadingType == TYPE_UNSUPPORTED || v.LeadingType == TYPE_POINTER {
+				return t.newError(v.Pos, "unsupported type %s in %s", v.Type, _struct.StructName)
+			}
+		}
 		t.genPackUnpackCode(_struct.StructName, _struct.Members)
 	}
 
