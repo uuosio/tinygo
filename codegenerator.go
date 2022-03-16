@@ -184,13 +184,16 @@ type ABI struct {
 }
 
 const (
-	TYPE_SLICE = iota + 1
+	TYPE_UNSUPPORTED = iota + 1
+	TYPE_NORMAL
+	TYPE_SLICE
 	TYPE_POINTER
 )
 
 type StructMember struct {
 	Name        string
 	Type        string
+	RawType     ast.Expr
 	LeadingType int
 	Pos         token.Pos
 }
@@ -402,6 +405,49 @@ func (t *CodeGenerator) newError(p token.Pos, format string, args ...interface{}
 	return errors.New(t.getLineInfo(p) + ":\n" + errMsg)
 }
 
+func parseType(field *ast.Field) (string, int) {
+	leadingType := TYPE_UNSUPPORTED
+	switch fieldType := field.Type.(type) {
+	case *ast.Ident:
+		return fieldType.Name, TYPE_NORMAL
+	case *ast.ArrayType:
+		if fieldType.Len != nil {
+			leadingType = TYPE_UNSUPPORTED
+		} else {
+			leadingType = TYPE_SLICE
+		}
+		//*ast.BasicLit
+		switch v := fieldType.Elt.(type) {
+		case *ast.Ident:
+			return v.Name, leadingType
+		case *ast.SelectorExpr:
+			ident := v.X.(*ast.Ident)
+			return ident.Name + "." + v.Sel.Name, leadingType
+		default:
+			return "", leadingType
+		}
+	case *ast.SelectorExpr:
+		ident := fieldType.X.(*ast.Ident)
+		return ident.Name + "." + fieldType.Sel.Name, leadingType
+	case *ast.StarExpr:
+		switch v2 := fieldType.X.(type) {
+		case *ast.Ident:
+			return v2.Name, TYPE_POINTER
+		case *ast.SelectorExpr:
+			switch x := v2.X.(type) {
+			case *ast.Ident:
+				return x.Name + "." + v2.Sel.Name, TYPE_POINTER
+			default:
+				return "", TYPE_UNSUPPORTED
+			}
+		default:
+			return "", TYPE_UNSUPPORTED
+		}
+	default:
+		return "", TYPE_UNSUPPORTED
+	}
+}
+
 func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberList *[]StructMember, isStructField bool, ignore bool) error {
 	if ignore {
 		_, ok := field.Type.(*ast.StarExpr)
@@ -414,118 +460,18 @@ func (t *CodeGenerator) parseField(structName string, field *ast.Field, memberLi
 		}
 	}
 
-	switch fieldType := field.Type.(type) {
-	case *ast.Ident:
-		if field.Names != nil {
-			for _, v := range field.Names {
-				member := StructMember{}
-				member.Pos = field.Pos()
-				member.Name = v.Name
-				member.Type = fieldType.Name
-				*memberList = append(*memberList, member)
-			}
-		} else {
-			//TODO: parse anonymous struct
-			member := StructMember{}
-			member.Pos = field.Pos()
-			member.Name = ""
-			member.Type = fieldType.Name
-			*memberList = append(*memberList, member)
-		}
-	case *ast.ArrayType:
-		var leadingType int
-		if fieldType.Len != nil {
-			return t.newError(field.Pos(), "fixed array does not supported in ABI")
-		} else {
-			leadingType = TYPE_SLICE
-		}
-		//*ast.BasicLit
-		switch v := fieldType.Elt.(type) {
-		case *ast.Ident:
-			for _, name := range field.Names {
-				member := StructMember{}
-				member.Pos = field.Pos()
-				member.Name = name.Name
-				member.Type = v.Name
-				member.LeadingType = leadingType
-				*memberList = append(*memberList, member)
-			}
-		case *ast.ArrayType:
-			for _, name := range field.Names {
-				if ident, ok := v.Elt.(*ast.Ident); ok {
-					member := StructMember{}
-					member.Pos = field.Pos()
-					member.Name = name.Name
-					member.Type = "[]" + ident.Name
-					member.LeadingType = leadingType
-					*memberList = append(*memberList, member)
-				} else {
-					errMsg := fmt.Sprintf("Unsupported field %s", name)
-					return t.newError(field.Pos(), errMsg)
-				}
-			}
-		case *ast.SelectorExpr:
-			ident := v.X.(*ast.Ident)
-			for _, name := range field.Names {
-				member := StructMember{}
-				member.Pos = field.Pos()
-				member.Name = name.Name
-				member.Type = ident.Name + "." + v.Sel.Name
-				member.LeadingType = leadingType
-				*memberList = append(*memberList, member)
-			}
-		default:
-			errMsg := fmt.Sprintf("unsupported type: %T %v", v, field.Names)
-			return t.newError(field.Pos(), errMsg)
-		}
-	case *ast.SelectorExpr:
-		ident := fieldType.X.(*ast.Ident)
-		for _, name := range field.Names {
-			member := StructMember{}
-			member.Pos = field.Pos()
-			member.Name = name.Name
-			member.Type = ident.Name + "." + fieldType.Sel.Name
-			// member.IsArray = false
-			*memberList = append(*memberList, member)
-		}
-	case *ast.StarExpr:
-		//Do not parse pointer type in struct
-		if isStructField {
-			color.Set(color.FgYellow)
-			log.Printf("Warning: Pointer type %v in %s ignored\n", field.Names, structName)
-			color.Unset()
-			return nil
-		}
+	if field.Names == nil {
+		errMsg := fmt.Sprintf("anoymous type unsupported")
+		return t.newError(field.Pos(), errMsg)
+	}
 
-		switch v2 := fieldType.X.(type) {
-		case *ast.Ident:
-			for _, name := range field.Names {
-				member := StructMember{}
-				member.Pos = field.Pos()
-				member.Name = name.Name
-				member.Type = v2.Name
-				member.LeadingType = TYPE_POINTER
-				*memberList = append(*memberList, member)
-			}
-		case *ast.SelectorExpr:
-			switch x := v2.X.(type) {
-			case *ast.Ident:
-				for _, name := range field.Names {
-					member := StructMember{}
-					member.Pos = field.Pos()
-					member.Name = name.Name
-					member.Type = x.Name + "." + v2.Sel.Name
-					member.LeadingType = TYPE_POINTER
-					*memberList = append(*memberList, member)
-				}
-			default:
-				panic(fmt.Sprintf("Unknown pointer type: %T %v", x, x))
-			}
-		default:
-			panic("Unhandled pointer type:" + fmt.Sprintf("%[1]v %[1]T", v2))
-		}
-	default:
-		return t.newError(field.Pos(), "Unsupported field: %v", field.Names)
+	for _, name := range field.Names {
+		member := StructMember{}
+		member.Pos = field.Pos()
+		member.Name = name.Name
+		member.RawType = field.Type
+		member.Type, member.LeadingType = parseType(field)
+		*memberList = append(*memberList, member)
 	}
 	return nil
 }
