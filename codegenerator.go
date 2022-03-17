@@ -1314,7 +1314,7 @@ func (t *CodeGenerator) GenCode() error {
 		t.genStruct(action.ActionName, action.Members)
 		for _, v := range action.Members {
 			if v.LeadingType == TYPE_UNSUPPORTED {
-				return t.newError(v.Pos, "unsupported type %s in %s", v.Type, action.ActionName)
+				return t.newError(v.Pos, "type of %s is unsupported in %s", v.Name, action.ActionName)
 			}
 		}
 		t.genPackUnpackCode(action.ActionName, action.Members)
