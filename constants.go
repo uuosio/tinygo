@@ -9,7 +9,7 @@ func (mi *{{.StructName}}DB) Store(v *{{.StructName}}, payer chain.Name) {
 	mi.MultiIndexInterface.Store(v, payer)
 }
 
-func (mi *{{.StructName}}DB) Get(id uint64) (database.Iterator, *{{.StructName}}) {
+func (mi *{{.StructName}}DB) Get(id uint64) (*database.Iterator, *{{.StructName}}) {
 	it, data := mi.MultiIndexInterface.Get(id)
 	if !it.IsOk() {
 		return it, nil
@@ -17,12 +17,12 @@ func (mi *{{.StructName}}DB) Get(id uint64) (database.Iterator, *{{.StructName}}
 	return it, data.(*{{.StructName}})
 }
 
-func (mi *{{.StructName}}DB) GetByIterator(it database.Iterator) *{{.StructName}} {
+func (mi *{{.StructName}}DB) GetByIterator(it *database.Iterator) *{{.StructName}} {
 	data := mi.MultiIndexInterface.GetByIterator(it)
 	return data.(*{{.StructName}})
 }
 
-func (mi *{{.StructName}}DB) Update(it database.Iterator, v *{{.StructName}}, payer chain.Name) {
+func (mi *{{.StructName}}DB) Update(it *database.Iterator, v *{{.StructName}}, payer chain.Name) {
 	mi.MultiIndexInterface.Update(it, v, payer)
 }
 `
