@@ -12,11 +12,81 @@ type NotAPacker struct {
 }
 
 //packer
+type NoCodeGen struct {
+	a1 uint64
+	a2 chain.Checksum256
+	a3 []uint64
+	a4 []chain.Checksum256
+}
+
+func (t *NoCodeGen) Pack() []byte {
+	enc := chain.NewEncoder(t.Size())
+	enc.PackUint64(t.a1)
+	enc.Pack(&t.a2)
+
+	{
+		enc.PackLength(len(t.a3))
+		for i := range t.a3 {
+			enc.PackUint64(t.a3[i])
+		}
+	}
+
+	{
+		enc.PackLength(len(t.a4))
+		for i := range t.a4 {
+			enc.Pack(&t.a4[i])
+		}
+	}
+	return enc.GetBytes()
+}
+
+func (t *NoCodeGen) Unpack(data []byte) int {
+	dec := chain.NewDecoder(data)
+	t.a1 = dec.UnpackUint64()
+	dec.Unpack(&t.a2)
+
+	{
+		length := dec.UnpackLength()
+		t.a3 = make([]uint64, length)
+		for i := 0; i < length; i++ {
+			t.a3[i] = dec.UnpackUint64()
+		}
+	}
+
+	{
+		length := dec.UnpackLength()
+		t.a4 = make([]chain.Checksum256, length)
+		for i := 0; i < length; i++ {
+			dec.Unpack(&t.a4[i])
+		}
+	}
+	return dec.Pos()
+}
+
+func (t *NoCodeGen) Size() int {
+	size := 0
+	size += 8           //a1
+	size += t.a2.Size() //a2
+	size += chain.PackedVarUint32Length(uint32(len(t.a3)))
+	size += len(t.a3) * 8
+	size += chain.PackedVarUint32Length(uint32(len(t.a4)))
+
+	for i := range t.a4 {
+		size += t.a4[i].Size()
+	}
+	return size
+}
+
+//packer
 type GenPackUnpack struct {
 	a1 uint64
 	a2 chain.Checksum256
 	a3 []uint64
 	a4 []chain.Checksum256
+}
+
+func (t *GenPackUnpack) sayHello() {
+
 }
 
 //table mysingleton singleton

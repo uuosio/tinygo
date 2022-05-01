@@ -126,6 +126,10 @@ type TableInfo struct {
 	SecondaryIndexes []SecondaryIndexInfo
 }
 
+type FunctionInfo struct {
+	Name string
+}
+
 type CodeGenerator struct {
 	dirName         string
 	currentFile     string
@@ -147,6 +151,7 @@ type CodeGenerator struct {
 	hasNewContractFunc bool
 	abiTypeMap         map[string]bool
 	indexTypeMap       map[string]bool
+	functionMap        map[string][]FunctionInfo
 }
 
 type ABITable struct {
@@ -345,6 +350,8 @@ func NewCodeGenerator() *CodeGenerator {
 	t.actionMap = make(map[string]bool)
 	t.abiTypeMap = make(map[string]bool)
 	t.indexTypeMap = make(map[string]bool)
+	t.functionMap = make(map[string][]FunctionInfo)
+
 	for _, abiType := range abiTypes() {
 		t.abiTypeMap[abiType] = true
 	}
@@ -890,6 +897,19 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 		t.hasNewContractFunc = true
 	}
 
+	if f.Recv != nil && f.Recv.List != nil {
+		for _, v := range f.Recv.List {
+			expr, ok := v.Type.(*ast.StarExpr) //ast.Ident ast.StarExpr
+			if ok {
+				ident := expr.X.(*ast.Ident)
+				if ident.Obj != nil {
+					obj := ident.Obj
+					t.functionMap[obj.Name] = append(t.functionMap[obj.Name], FunctionInfo{f.Name.Name})
+				}
+			}
+		}
+	}
+
 	if f.Doc == nil {
 		return nil
 	}
@@ -941,7 +961,11 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 
 	if f.Recv.List != nil {
 		for _, v := range f.Recv.List {
-			expr := v.Type.(*ast.StarExpr)
+			expr, ok := v.Type.(*ast.StarExpr) //ast.Ident ast.StarExpr
+			if !ok {
+				return t.newError(f.Pos(), "Not a pointer type")
+			}
+
 			ident := expr.X.(*ast.Ident)
 			if ident.Obj != nil {
 				obj := ident.Obj
@@ -1183,7 +1207,25 @@ func (t *CodeGenerator) genStruct(structName string, members []StructMember) {
 	t.writeCode("}")
 }
 
+func (t *CodeGenerator) hasPackFunction(structName string) bool {
+	funcs, ok := t.functionMap[structName]
+	if !ok {
+		return false
+	}
+
+	for _, v := range funcs {
+		if v.Name == "Pack" {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *CodeGenerator) genPackUnpackCode(structName string, members []StructMember) {
+	if t.hasPackFunction(structName) {
+		return
+	}
+
 	type Struct struct {
 		StructName string
 		Members    []StructMember
@@ -1613,7 +1655,6 @@ func (t *CodeGenerator) Analyse() {
 func GenerateCode(inFile string, outFile string, tags []string) error {
 	// log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
-
 	gen := NewCodeGenerator()
 	gen.fset = token.NewFileSet()
 

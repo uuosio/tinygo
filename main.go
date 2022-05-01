@@ -179,7 +179,7 @@ func Build(pkgName, outpath string, options *compileopts.Options) error {
 			allTags := make([]string, 0, len(options.Tags)+len(config.Target.BuildTags))
 			allTags = append(allTags, tags...)
 			allTags = append(allTags, config.Target.BuildTags...)
-			if err := GenerateCode(pkgName, outpath, allTags); err != nil {
+			if err := GenerateCode(pkgName, "", allTags); err != nil {
 				return err
 			}
 		}
