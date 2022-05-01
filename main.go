@@ -179,7 +179,7 @@ func Build(pkgName, outpath string, options *compileopts.Options) error {
 			allTags := make([]string, 0, len(options.Tags)+len(config.Target.BuildTags))
 			allTags = append(allTags, tags...)
 			allTags = append(allTags, config.Target.BuildTags...)
-			if err := GenerateCode(pkgName, allTags); err != nil {
+			if err := GenerateCode(pkgName, outpath, allTags); err != nil {
 				return err
 			}
 		}
@@ -1302,7 +1302,7 @@ func main() {
 		flagTest = flag.Bool("test", false, "supply -test flag to go list")
 	}
 	var outpath string
-	if command == "help" || command == "build" || command == "build-library" || command == "test" {
+	if command == "help" || command == "build" || command == "build-library" || command == "test" || command == "gencode" {
 		flag.StringVar(&outpath, "o", "", "output filename")
 	}
 	var testCompileOnlyFlag, testVerboseFlag, testShortFlag *bool
@@ -1468,7 +1468,7 @@ func main() {
 		tags := strings.Split(options.Tags, " ")
 		tags = append(tags, "eosio")
 		tags = append(tags, "tinygo.wasm")
-		err := GenerateCode(pkgName, tags)
+		err := GenerateCode(pkgName, outpath, tags)
 		handleCompilerError(err)
 	case "build-library":
 		// Note: this command is only meant to be used while making a release!

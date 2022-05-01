@@ -1297,8 +1297,11 @@ func (t *CodeGenerator) genSizeCodeForSpecialStruct(specialType int, structName 
 	}
 }
 
-func (t *CodeGenerator) GenCode() error {
-	f, err := os.Create(t.dirName + "/generated.go")
+func (t *CodeGenerator) GenCode(generatedFile string) error {
+	if generatedFile == "" {
+		generatedFile = "generated.go"
+	}
+	f, err := os.Create(filepath.Join(t.dirName, generatedFile))
 	if err != nil {
 		return err
 	}
@@ -1607,7 +1610,7 @@ func (t *CodeGenerator) Analyse() {
 	}
 }
 
-func GenerateCode(inFile string, tags []string) error {
+func GenerateCode(inFile string, outFile string, tags []string) error {
 	// log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
 
@@ -1641,7 +1644,7 @@ func GenerateCode(inFile string, tags []string) error {
 		return err
 	}
 
-	if err := gen.GenCode(); err != nil {
+	if err := gen.GenCode(outFile); err != nil {
 		return err
 	}
 	gen.Finish()
