@@ -31,6 +31,6 @@
 		"-lc++",
 		"-leosio"
 	],
-	"emulator":      ["wasmtime"],
+	"emulator":      "wasmtime {}",
 	"wasm-abi":      "generic"
 }
