@@ -1,5 +1,5 @@
-// +build !eosio
-// +build gc.leaking
+//go:build gc.leaking && !eosio
+// +build gc.leaking,!eosio
 
 package runtime
 
@@ -21,6 +21,9 @@ import (
 // Ever-incrementing pointer: no memory is freed.
 var heapptr = heapStart
 
+// Inlining alloc() speeds things up slightly but bloats the executable by 50%,
+// see https://github.com/tinygo-org/tinygo/issues/2674.  So don't.
+//go:noinline
 func alloc(size uintptr, layout unsafe.Pointer) unsafe.Pointer {
 	// TODO: this can be optimized by not casting between pointers and ints so
 	// much. And by using platform-native data types (e.g. *uint8 for 8-bit
@@ -36,13 +39,9 @@ func alloc(size uintptr, layout unsafe.Pointer) unsafe.Pointer {
 		// Failed to make the heap bigger, so we must really be out of memory.
 		runtimePanic("out of memory")
 	}
-
-	C.memset(unsafe.Pointer(addr), 0, C.size_t(size))
-	// for i := uintptr(0); i < uintptr(size); i += 4 {
-	// 	ptr := (*uint32)(unsafe.Pointer(addr + i))
-	// 	*ptr = 0
-	// }
-	return unsafe.Pointer(addr)
+	pointer := unsafe.Pointer(addr)
+	memzero(pointer, size)
+	return pointer
 }
 
 func realloc(ptr unsafe.Pointer, size uintptr) unsafe.Pointer {

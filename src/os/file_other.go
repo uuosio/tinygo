@@ -1,3 +1,4 @@
+//go:build baremetal || (wasm && !wasi && !eosio)
 // +build baremetal wasm,!wasi,!eosio
 
 package os
@@ -9,10 +10,12 @@ import (
 // Stdin, Stdout, and Stderr are open Files pointing to the standard input,
 // standard output, and standard error file descriptors.
 var (
-	Stdin  = &File{stdioFileHandle(0), "/dev/stdin"}
-	Stdout = &File{stdioFileHandle(1), "/dev/stdout"}
-	Stderr = &File{stdioFileHandle(2), "/dev/stderr"}
+	Stdin  = NewFile(0, "/dev/stdin")
+	Stdout = NewFile(1, "/dev/stdout")
+	Stderr = NewFile(2, "/dev/stderr")
 )
+
+const DevNull = "/dev/null"
 
 // isOS indicates whether we're running on a real operating system with
 // filesystem support.
@@ -21,6 +24,19 @@ const isOS = false
 // stdioFileHandle represents one of stdin, stdout, or stderr depending on the
 // number. It implements the FileHandle interface.
 type stdioFileHandle uint8
+
+// file is the real representation of *File.
+// The extra level of indirection ensures that no clients of os
+// can overwrite this data, which could cause the finalizer
+// to close the wrong file descriptor.
+type file struct {
+	handle FileHandle
+	name   string
+}
+
+func NewFile(fd uintptr, name string) *File {
+	return &File{&file{stdioFileHandle(fd), name}}
+}
 
 // Read is unsupported on this system.
 func (f stdioFileHandle) Read(b []byte) (n int, err error) {
@@ -55,15 +71,15 @@ func (f stdioFileHandle) Seek(offset int64, whence int) (int64, error) {
 	return -1, ErrUnsupported
 }
 
+func (f stdioFileHandle) Fd() uintptr {
+	return uintptr(f)
+}
+
 //go:linkname putchar runtime.putchar
 func putchar(c byte)
 
 func Pipe() (r *File, w *File, err error) {
 	return nil, nil, ErrNotImplemented
-}
-
-func (f *File) Seek(offset int64, whence int) (ret int64, err error) {
-	return 0, ErrNotImplemented
 }
 
 func Readlink(name string) (string, error) {

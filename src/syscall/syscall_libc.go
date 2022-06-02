@@ -1,3 +1,4 @@
+//go:build darwin || nintendoswitch || wasi || eosio
 // +build darwin nintendoswitch wasi eosio
 
 package syscall
@@ -14,6 +15,14 @@ type sliceHeader struct {
 
 func Close(fd int) (err error) {
 	if libc_close(int32(fd)) < 0 {
+		err = getErrno()
+	}
+	return
+}
+
+func Dup(fd int) (fd2 int, err error) {
+	fd2 = int(libc_dup(int32(fd)))
+	if fd2 < 0 {
 		err = getErrno()
 	}
 	return
@@ -144,9 +153,18 @@ func Kill(pid int, sig Signal) (err error) {
 
 type SysProcAttr struct{}
 
-func Pipe2(p []int, flags int) (err error) {
-	return ENOSYS // TODO
-}
+// TODO
+type WaitStatus uint32
+
+func (w WaitStatus) Exited() bool       { return false }
+func (w WaitStatus) ExitStatus() int    { return 0 }
+func (w WaitStatus) Signaled() bool     { return false }
+func (w WaitStatus) Signal() Signal     { return 0 }
+func (w WaitStatus) CoreDump() bool     { return false }
+func (w WaitStatus) Stopped() bool      { return false }
+func (w WaitStatus) Continued() bool    { return false }
+func (w WaitStatus) StopSignal() Signal { return 0 }
+func (w WaitStatus) TrapCause() int     { return 0 }
 
 func Getenv(key string) (value string, found bool) {
 	data := cstring(key)
@@ -217,6 +235,14 @@ func Mmap(fd int, offset int64, length int, prot int, flags int) (data []byte, e
 	return (*[1 << 30]byte)(addr)[:length:length], nil
 }
 
+func Munmap(b []byte) (err error) {
+	errCode := libc_munmap(unsafe.Pointer(&b[0]), uintptr(len(b)))
+	if errCode != 0 {
+		err = getErrno()
+	}
+	return err
+}
+
 func Mprotect(b []byte, prot int) (err error) {
 	errCode := libc_mprotect(unsafe.Pointer(&b[0]), uintptr(len(b)), int32(prot))
 	if errCode != 0 {
@@ -225,12 +251,37 @@ func Mprotect(b []byte, prot int) (err error) {
 	return
 }
 
+func Getpagesize() int {
+	return int(libc_getpagesize())
+}
+
 func Environ() []string {
-	environ := libc_environ
-	var envs []string
-	for *environ != nil {
-		// Convert the C string to a Go string.
-		length := libc_strlen(*environ)
+
+	// This function combines all the environment into a single allocation.
+	// While this optimizes for memory usage and garbage collector
+	// overhead, it does run the risk of potentially pinning a "large"
+	// allocation if a user holds onto a single environment variable or
+	// value.  Having each variable be its own allocation would make the
+	// trade-off in the other direction.
+
+	// calculate total memory required
+	var length uintptr
+	var vars int
+	for environ := libc_environ; *environ != nil; {
+		length += libc_strlen(*environ)
+		vars++
+		environ = (*unsafe.Pointer)(unsafe.Pointer(uintptr(unsafe.Pointer(environ)) + unsafe.Sizeof(environ)))
+	}
+
+	// allocate our backing slice for the strings
+	b := make([]byte, length)
+	// and the slice we're going to return
+	envs := make([]string, 0, vars)
+
+	// loop over the environment again, this time copying over the data to the backing slice
+	for environ := libc_environ; *environ != nil; {
+		length = libc_strlen(*environ)
+		// construct a Go string pointing at the libc-allocated environment variable data
 		var envVar string
 		rawEnvVar := (*struct {
 			ptr    unsafe.Pointer
@@ -238,8 +289,16 @@ func Environ() []string {
 		})(unsafe.Pointer(&envVar))
 		rawEnvVar.ptr = *environ
 		rawEnvVar.length = length
-		envs = append(envs, envVar)
-		// This is the Go equivalent of "environ++" in C.
+		// pull off the number of bytes we need for this environment variable
+		var bs []byte
+		bs, b = b[:length], b[length:]
+		// copy over the bytes to the Go heap
+		copy(bs, envVar)
+		// convert trimmed slice to string
+		s := *(*string)(unsafe.Pointer(&bs))
+		// add s to our list of environment variables
+		envs = append(envs, s)
+		// environ++
 		environ = (*unsafe.Pointer)(unsafe.Pointer(uintptr(unsafe.Pointer(environ)) + unsafe.Sizeof(environ)))
 	}
 	return envs
@@ -297,13 +356,25 @@ func libc_open(pathname *byte, flags int32, mode uint32) int32
 //export close
 func libc_close(fd int32) int32
 
+// int dup(int fd)
+//export dup
+func libc_dup(fd int32) int32
+
 // void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
 //export mmap
 func libc_mmap(addr unsafe.Pointer, length uintptr, prot, flags, fd int32, offset uintptr) unsafe.Pointer
 
+// int munmap(void *addr, size_t length);
+//export munmap
+func libc_munmap(addr unsafe.Pointer, length uintptr) int32
+
 // int mprotect(void *addr, size_t len, int prot);
 //export mprotect
 func libc_mprotect(addr unsafe.Pointer, len uintptr, prot int32) int32
+
+// int getpagesize();
+//export getpagesize
+func libc_getpagesize() int32
 
 // int chdir(const char *pathname, mode_t mode);
 //export chdir

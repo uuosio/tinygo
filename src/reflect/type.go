@@ -18,7 +18,7 @@ import (
 //         if set) and xxx contains the type kind number:
 //             0 (0001): Chan
 //             1 (0011): Interface
-//             2 (0101): Ptr
+//             2 (0101): Pointer
 //             3 (0111): Slice
 //             4 (1001): Array
 //             5 (1011): Func
@@ -54,13 +54,16 @@ const (
 	UnsafePointer
 	Chan
 	Interface
-	Ptr
+	Pointer
 	Slice
 	Array
 	Func
 	Map
 	Struct
 )
+
+// Ptr is the old name for the Pointer kind.
+const Ptr = Pointer
 
 func (k Kind) String() string {
 	switch k {
@@ -104,7 +107,7 @@ func (k Kind) String() string {
 		return "chan"
 	case Interface:
 		return "interface"
-	case Ptr:
+	case Pointer:
 		return "ptr"
 	case Slice:
 		return "slice"
@@ -124,6 +127,35 @@ func (k Kind) String() string {
 // basicType returns a new Type for this kind if Kind is a basic type.
 func (k Kind) basicType() rawType {
 	return rawType(k << 1)
+}
+
+// Copied from reflect/type.go
+// https://go.dev/src/reflect/type.go?#L348
+
+// ChanDir represents a channel type's direction.
+type ChanDir int
+
+const (
+	RecvDir ChanDir             = 1 << iota // <-chan
+	SendDir                                 // chan<-
+	BothDir = RecvDir | SendDir             // chan
+)
+
+// Method represents a single method.
+type Method struct {
+	// Name is the method name.
+	Name string
+
+	// PkgPath is the package path that qualifies a lower case (unexported)
+	// method name. It is empty for upper case (exported) method names.
+	// The combination of PkgPath and Name uniquely identifies a method
+	// in a method set.
+	// See https://golang.org/ref/spec#Uniqueness_of_identifiers
+	PkgPath string
+
+	Type  Type  // method type
+	Func  Value // func with receiver as first argument
+	Index int   // index for Type.Method
 }
 
 // The following Type type has been copied almost entirely from
@@ -173,7 +205,7 @@ type Type interface {
 	//
 	// For an interface type, the returned Method's Type field gives the
 	// method signature, without a receiver, and the Func field is nil.
-	//MethodByName(string) (Method, bool)
+	MethodByName(string) (Method, bool)
 
 	// NumMethod returns the number of exported methods in the type's method set.
 	NumMethod() int
@@ -187,7 +219,7 @@ type Type interface {
 	// If the type was predeclared (string, error) or not defined (*T, struct{},
 	// []int, or A where A is an alias for a non-defined type), the package path
 	// will be the empty string.
-	//PkgPath() string
+	PkgPath() string
 
 	// Size returns the number of bytes needed to store
 	// a value of the given type; it is analogous to unsafe.Sizeof.
@@ -223,7 +255,7 @@ type Type interface {
 	//	Chan: ChanDir, Elem
 	//	Func: In, NumIn, Out, NumOut, IsVariadic.
 	//	Map: Key, Elem
-	//	Ptr: Elem
+	//	Pointer: Elem
 	//	Slice: Elem
 	//	Struct: Field, FieldByIndex, FieldByName, FieldByNameFunc, NumField
 
@@ -234,7 +266,7 @@ type Type interface {
 
 	// ChanDir returns a channel type's direction.
 	// It panics if the type's Kind is not Chan.
-	//ChanDir() ChanDir
+	ChanDir() ChanDir
 
 	// IsVariadic reports whether a function type's final input parameter
 	// is a "..." parameter. If so, t.In(t.NumIn() - 1) returns the parameter's
@@ -248,10 +280,10 @@ type Type interface {
 	//	t.IsVariadic() == true
 	//
 	// IsVariadic panics if the type's Kind is not Func.
-	//IsVariadic() bool
+	IsVariadic() bool
 
 	// Elem returns a type's element type.
-	// It panics if the type's Kind is not Array, Chan, Map, Ptr, or Slice.
+	// It panics if the type's Kind is not Array, Chan, Map, Pointer, or Slice.
 	Elem() Type
 
 	// Field returns a struct type's i'th field.
@@ -267,7 +299,7 @@ type Type interface {
 
 	// FieldByName returns the struct field with the given name
 	// and a boolean indicating if the field was found.
-	//FieldByName(name string) (StructField, bool)
+	FieldByName(name string) (StructField, bool)
 
 	// FieldByNameFunc returns the struct field with a name
 	// that satisfies the match function and a boolean indicating if
@@ -286,7 +318,7 @@ type Type interface {
 	// In returns the type of a function type's i'th input parameter.
 	// It panics if the type's Kind is not Func.
 	// It panics if i is not in the range [0, NumIn()).
-	//In(i int) Type
+	In(i int) Type
 
 	// Key returns a map type's key type.
 	// It panics if the type's Kind is not Map.
@@ -302,16 +334,16 @@ type Type interface {
 
 	// NumIn returns a function type's input parameter count.
 	// It panics if the type's Kind is not Func.
-	//NumIn() int
+	NumIn() int
 
 	// NumOut returns a function type's output parameter count.
 	// It panics if the type's Kind is not Func.
-	//NumOut() int
+	NumOut() int
 
 	// Out returns the type of a function type's i'th output parameter.
 	// It panics if the type's Kind is not Func.
 	// It panics if i is not in the range [0, NumOut()).
-	//Out(i int) Type
+	Out(i int) Type
 }
 
 // The typecode as used in an interface{}.
@@ -321,13 +353,15 @@ func TypeOf(i interface{}) Type {
 	return ValueOf(i).typecode
 }
 
-func PtrTo(t Type) Type {
-	if t.Kind() == Ptr {
+func PtrTo(t Type) Type { return PointerTo(t) }
+
+func PointerTo(t Type) Type {
+	if t.Kind() == Pointer {
 		panic("reflect: cannot make **T type")
 	}
 	ptrType := t.(rawType)<<5 | 5 // 0b0101 == 5
 	if ptrType>>5 != t {
-		panic("reflect: PtrTo type does not fit")
+		panic("reflect: PointerTo type does not fit")
 	}
 	return ptrType
 }
@@ -353,7 +387,7 @@ func (t rawType) Elem() Type {
 
 func (t rawType) elem() rawType {
 	switch t.Kind() {
-	case Chan, Ptr, Slice:
+	case Chan, Pointer, Slice:
 		return t.stripPrefix()
 	case Array:
 		index := t.stripPrefix()
@@ -537,7 +571,7 @@ func (t rawType) Size() uintptr {
 		return 16
 	case String:
 		return unsafe.Sizeof("")
-	case UnsafePointer, Chan, Map, Ptr:
+	case UnsafePointer, Chan, Map, Pointer:
 		return unsafe.Sizeof(uintptr(0))
 	case Slice:
 		return unsafe.Sizeof([]int{})
@@ -586,7 +620,7 @@ func (t rawType) Align() int {
 		return int(unsafe.Alignof(complex128(0)))
 	case String:
 		return int(unsafe.Alignof(""))
-	case UnsafePointer, Chan, Map, Ptr:
+	case UnsafePointer, Chan, Map, Pointer:
 		return int(unsafe.Alignof(uintptr(0)))
 	case Slice:
 		return int(unsafe.Alignof([]int(nil)))
@@ -652,7 +686,7 @@ func (t rawType) Comparable() bool {
 		return true
 	case Interface:
 		return true
-	case Ptr:
+	case Pointer:
 		return true
 	case Slice:
 		return false
@@ -675,8 +709,24 @@ func (t rawType) Comparable() bool {
 	}
 }
 
+func (t rawType) ChanDir() ChanDir {
+	panic("unimplemented: (reflect.Type).ChanDir()")
+}
+
 func (t rawType) ConvertibleTo(u Type) bool {
 	panic("unimplemented: (reflect.Type).ConvertibleTo()")
+}
+
+func (t rawType) IsVariadic() bool {
+	panic("unimplemented: (reflect.Type).IsVariadic()")
+}
+
+func (t rawType) NumIn() int {
+	panic("unimplemented: (reflect.Type).NumIn()")
+}
+
+func (t rawType) NumOut() int {
+	panic("unimplemented: (reflect.Type).NumOut()")
 }
 
 func (t rawType) NumMethod() int {
@@ -689,6 +739,26 @@ func (t rawType) Name() string {
 
 func (t rawType) Key() Type {
 	panic("unimplemented: (reflect.Type).Key()")
+}
+
+func (t rawType) In(i int) Type {
+	panic("unimplemented: (reflect.Type).In()")
+}
+
+func (t rawType) Out(i int) Type {
+	panic("unimplemented: (reflect.Type).Out()")
+}
+
+func (t rawType) MethodByName(name string) (Method, bool) {
+	panic("unimplemented: (reflect.Type).MethodByName()")
+}
+
+func (t rawType) PkgPath() string {
+	panic("unimplemented: (reflect.Type).PkgPath()")
+}
+
+func (t rawType) FieldByName(name string) (StructField, bool) {
+	panic("unimplemented: (reflect.Type).FieldByName()")
 }
 
 // A StructField describes a single field in a struct.
@@ -704,6 +774,7 @@ type StructField struct {
 	Tag       StructTag // field tag string
 	Anonymous bool
 	Offset    uintptr
+	Index     []int // index sequence for Type.FieldByIndex
 }
 
 // IsExported reports whether the field is exported.
@@ -799,4 +870,8 @@ func (e *TypeError) Error() string {
 
 func align(offset uintptr, alignment uintptr) uintptr {
 	return (offset + alignment - 1) &^ (alignment - 1)
+}
+
+func SliceOf(t Type) Type {
+	panic("unimplemented: reflect.SliceOf()")
 }

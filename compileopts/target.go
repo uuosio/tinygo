@@ -45,8 +45,8 @@ type TargetSpec struct {
 	LDFlags          []string `json:"ldflags"`
 	LinkerScript     string   `json:"linkerscript"`
 	ExtraFiles       []string `json:"extra-files"`
-	RP2040BootPatch  *bool    `json:"rp2040-boot-patch"`        // Patch RP2040 2nd stage bootloader checksum
-	Emulator         []string `json:"emulator" override:"copy"` // inherited Emulator must not be append
+	RP2040BootPatch  *bool    `json:"rp2040-boot-patch"` // Patch RP2040 2nd stage bootloader checksum
+	Emulator         string   `json:"emulator"`
 	FlashCommand     string   `json:"flash-command"`
 	GDB              []string `json:"gdb"`
 	PortReset        string   `json:"flash-1200-bps-reset"`
@@ -60,6 +60,7 @@ type TargetSpec struct {
 	OpenOCDTarget    string   `json:"openocd-target"`
 	OpenOCDTransport string   `json:"openocd-transport"`
 	OpenOCDCommands  []string `json:"openocd-commands"`
+	OpenOCDVerify    *bool    `json:"openocd-verify"` // enable verify when flashing with openocd
 	JLinkDevice      string   `json:"jlink-device"`
 	CodeModel        string   `json:"code-model"`
 	RelocationModel  string   `json:"relocation-model"`
@@ -90,19 +91,8 @@ func (spec *TargetSpec) overrideProperties(child *TargetSpec) {
 			if !src.IsNil() {
 				dst.Set(src)
 			}
-		case reflect.Slice: // for slices...
-			if src.Len() > 0 { // ... if not empty ...
-				switch tag := field.Tag.Get("override"); tag {
-				case "copy":
-					// copy the field of child to spec
-					dst.Set(src)
-				case "append", "":
-					// or append the field of child to spec
-					dst.Set(reflect.AppendSlice(dst, src))
-				default:
-					panic("override mode must be 'copy' or 'append' (default). I don't know how to '" + tag + "'.")
-				}
-			}
+		case reflect.Slice: // for slices, append the field
+			dst.Set(reflect.AppendSlice(dst, src))
 		default:
 			panic("unknown field type : " + kind.String())
 		}
@@ -259,7 +249,7 @@ func defaultTarget(goos, goarch, triple string) (*TargetSpec, error) {
 		spec.Features = "+cx8,+fxsr,+mmx,+sse,+sse2,+x87"
 	case "arm":
 		spec.CPU = "generic"
-		spec.CFlags = append(spec.CFlags, "-fno-unwind-tables")
+		spec.CFlags = append(spec.CFlags, "-fno-unwind-tables", "-fno-asynchronous-unwind-tables")
 		switch strings.Split(triple, "-")[0] {
 		case "armv5":
 			spec.Features = "+armv5t,+strict-align,-aes,-bf16,-d32,-dotprod,-fp-armv8,-fp-armv8d16,-fp-armv8d16sp,-fp-armv8sp,-fp16,-fp16fml,-fp64,-fpregs,-fullfp16,-mve.fp,-neon,-sha2,-thumb-mode,-vfp2,-vfp2sp,-vfp3,-vfp3d16,-vfp3d16sp,-vfp3sp,-vfp4,-vfp4d16,-vfp4d16sp,-vfp4sp"
@@ -273,8 +263,20 @@ func defaultTarget(goos, goarch, triple string) (*TargetSpec, error) {
 		spec.Features = "+neon"
 	}
 	if goos == "darwin" {
-		spec.CFlags = append(spec.CFlags, "-isysroot", "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
-		spec.LDFlags = append(spec.LDFlags, "-Wl,-dead_strip")
+		spec.Linker = "ld.lld"
+		spec.Libc = "darwin-libSystem"
+		arch := strings.Split(triple, "-")[0]
+		platformVersion := strings.TrimPrefix(strings.Split(triple, "-")[2], "macosx")
+		flavor := "darwin"
+		if strings.Split(llvm.Version, ".")[0] < "13" {
+			flavor = "darwinnew" // needed on LLVM 12 and below
+		}
+		spec.LDFlags = append(spec.LDFlags,
+			"-flavor", flavor,
+			"-dead_strip",
+			"-arch", arch,
+			"-platform_version", "macos", platformVersion, platformVersion,
+		)
 	} else if goos == "linux" {
 		spec.Linker = "ld.lld"
 		spec.RTLib = "compiler-rt"
@@ -318,16 +320,25 @@ func defaultTarget(goos, goarch, triple string) (*TargetSpec, error) {
 	if goarch != runtime.GOARCH {
 		// Some educated guesses as to how to invoke helper programs.
 		spec.GDB = []string{"gdb-multiarch"}
-		if goarch == "arm" && goos == "linux" {
-			spec.Emulator = []string{"qemu-arm"}
-		}
-		if goarch == "arm64" && goos == "linux" {
-			spec.Emulator = []string{"qemu-aarch64"}
+		if goos == "linux" {
+			switch goarch {
+			case "386":
+				// amd64 can _usually_ run 32-bit programs, so skip the emulator in that case.
+				if runtime.GOARCH != "amd64" {
+					spec.Emulator = "qemu-i386 {}"
+				}
+			case "amd64":
+				spec.Emulator = "qemu-x86_64 {}"
+			case "arm":
+				spec.Emulator = "qemu-arm {}"
+			case "arm64":
+				spec.Emulator = "qemu-aarch64 {}"
+			}
 		}
 	}
 	if goos != runtime.GOOS {
 		if goos == "windows" {
-			spec.Emulator = []string{"wine"}
+			spec.Emulator = "wine {}"
 		}
 	}
 	return &spec, nil

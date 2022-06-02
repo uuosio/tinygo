@@ -1,23 +1,47 @@
+//go:build wasi || eosio
 // +build wasi eosio
 
 package syscall
 
 import (
+	"internal/itoa"
 	"unsafe"
 )
 
 // https://github.com/WebAssembly/wasi-libc/blob/main/expected/wasm32-wasi/predefined-macros.txt
+// disagrees with ../../lib/wasi-libc/libc-top-half/musl/arch/wasm32/bits/signal.h for SIGCHLD?
+// https://github.com/WebAssembly/wasi-libc/issues/271
 
 type Signal int
 
 const (
-	SIGCHLD = 16
-	SIGINT  = 2
-	SIGKILL = 9
-	SIGTRAP = 5
-	SIGQUIT = 3
-	SIGTERM = 15
+	SIGINT  Signal = 2
+	SIGQUIT Signal = 3
+	SIGILL  Signal = 4
+	SIGTRAP Signal = 5
+	SIGABRT Signal = 6
+	SIGBUS  Signal = 7
+	SIGFPE  Signal = 8
+	SIGKILL Signal = 9
+	SIGSEGV Signal = 11
+	SIGPIPE Signal = 13
+	SIGTERM Signal = 15
+	SIGCHLD Signal = 17
 )
+
+func (s Signal) Signal() {}
+
+func (s Signal) String() string {
+	if 0 <= s && int(s) < len(signals) {
+		str := signals[s]
+		if str != "" {
+			return str
+		}
+	}
+	return "signal " + itoa.Itoa(int(s))
+}
+
+var signals = [...]string{}
 
 const (
 	Stdin  = 0
@@ -43,6 +67,19 @@ const (
 	O_SYNC   = __WASI_FDFLAGS_SYNC
 
 	O_CLOEXEC = 0
+
+	// ../../lib/wasi-libc/sysroot/include/sys/mman.h
+	MAP_FILE      = 0
+	MAP_SHARED    = 0x01
+	MAP_PRIVATE   = 0x02
+	MAP_ANON      = 0x20
+	MAP_ANONYMOUS = MAP_ANON
+
+	// ../../lib/wasi-libc/sysroot/include/sys/mman.h
+	PROT_NONE  = 0
+	PROT_READ  = 1
+	PROT_WRITE = 2
+	PROT_EXEC  = 4
 )
 
 //go:extern errno
@@ -202,6 +239,31 @@ const (
 	S_IXUSR  = 0x40
 )
 
+// dummy
+const (
+	DT_BLK     = 0x6
+	DT_CHR     = 0x2
+	DT_DIR     = 0x4
+	DT_FIFO    = 0x1
+	DT_LNK     = 0xa
+	DT_REG     = 0x8
+	DT_SOCK    = 0xc
+	DT_UNKNOWN = 0x0
+	DT_WHT     = 0xe
+)
+
+// dummy
+type Dirent struct {
+	Ino    uint64
+	Reclen uint16
+	Type   uint8
+	Name   [1024]int8
+}
+
+func ReadDirent(fd int, buf []byte) (n int, err error) {
+	return -1, ENOSYS
+}
+
 func Stat(path string, p *Stat_t) (err error) {
 	data := cstring(path)
 	n := libc_stat(&data[0], unsafe.Pointer(p))
@@ -228,6 +290,10 @@ func Lstat(path string, p *Stat_t) (err error) {
 		err = getErrno()
 	}
 	return
+}
+
+func Pipe2(p []int, flags int) (err error) {
+	return ENOSYS // TODO
 }
 
 // int stat(const char *path, struct stat * buf);

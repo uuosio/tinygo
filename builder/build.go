@@ -37,8 +37,14 @@ import (
 // BuildResult is the output of a build. This includes the binary itself and
 // some other metadata that is obtained while building the binary.
 type BuildResult struct {
+	// The executable directly from the linker, usually including debug
+	// information. Used for GDB for example.
+	Executable string
+
 	// A path to the output binary. It will be removed after Build returns, so
 	// if it should be kept it must be copied or moved away.
+	// It is often the same as Executable, but differs if the output format is
+	// .hex for example (instead of the usual ELF).
 	Binary string
 
 	// The directory of the main package. This is useful for testing as the test
@@ -99,7 +105,20 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
+	if config.Options.Work {
+		fmt.Printf("WORK=%s\n", dir)
+	} else {
+		defer os.RemoveAll(dir)
+	}
+
+	// Look up the build cache directory, which is used to speed up incremental
+	// builds.
+	cacheDir := goenv.Get("GOCACHE")
+	if cacheDir == "off" {
+		// Use temporary build directory instead, effectively disabling the
+		// build cache.
+		cacheDir = dir
+	}
 
 	// Check for a libc dependency.
 	// As a side effect, this also creates the headers for the given libc, if
@@ -107,6 +126,9 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	root := goenv.Get("TINYGOROOT")
 	var libcDependencies []*compileJob
 	switch config.Target.Libc {
+	case "darwin-libSystem":
+		job := makeDarwinLibSystemJob(config, dir)
+		libcDependencies = append(libcDependencies, job)
 	case "musl":
 		job, unlock, err := Musl.load(config, dir)
 		if err != nil {
@@ -207,6 +229,21 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	var packageJobs []*compileJob
 	packageBitcodePaths := make(map[string]string)
 	packageActionIDs := make(map[string]string)
+
+	if config.Options.GlobalValues["runtime"]["buildVersion"] == "" {
+		version := goenv.Version
+		if strings.HasSuffix(goenv.Version, "-dev") && goenv.GitSha1 != "" {
+			version += "-" + goenv.GitSha1
+		}
+		if config.Options.GlobalValues == nil {
+			config.Options.GlobalValues = make(map[string]map[string]string)
+		}
+		if config.Options.GlobalValues["runtime"] == nil {
+			config.Options.GlobalValues["runtime"] = make(map[string]string)
+		}
+		config.Options.GlobalValues["runtime"]["buildVersion"] = version
+	}
+
 	for _, pkg := range lprogram.Sorted() {
 		pkg := pkg // necessary to avoid a race condition
 
@@ -250,12 +287,6 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 
 		// Determine the path of the bitcode file (which is a serialized version
 		// of a LLVM module).
-		cacheDir := goenv.Get("GOCACHE")
-		if cacheDir == "off" {
-			// Use temporary build directory instead, effectively disabling the
-			// build cache.
-			cacheDir = dir
-		}
 		bitcodePath := filepath.Join(cacheDir, "pkg-"+hex.EncodeToString(hash[:])+".bc")
 		packageBitcodePaths[pkg.ImportPath] = bitcodePath
 
@@ -428,7 +459,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 			// Load and link all the bitcode files. This does not yet optimize
 			// anything, it only links the bitcode files together.
 			ctx := llvm.NewContext()
-			mod = ctx.NewModule("")
+			mod = ctx.NewModule("main")
 			for _, pkg := range lprogram.Sorted() {
 				pkgMod, err := ctx.ParseBitcodeFile(packageBitcodePaths[pkg.ImportPath])
 				if err != nil {
@@ -524,8 +555,14 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 			}
 			return ioutil.WriteFile(outpath, llvmBuf.Bytes(), 0666)
 		case ".bc":
-			data := llvm.WriteBitcodeToMemoryBuffer(mod).Bytes()
-			return ioutil.WriteFile(outpath, data, 0666)
+			var buf llvm.MemoryBuffer
+			if config.UseThinLTO() {
+				buf = llvm.WriteThinLTOBitcodeToMemoryBuffer(mod)
+			} else {
+				buf = llvm.WriteBitcodeToMemoryBuffer(mod)
+			}
+			defer buf.Dispose()
+			return ioutil.WriteFile(outpath, buf.Bytes(), 0666)
 		case ".ll":
 			data := []byte(mod.String())
 			return ioutil.WriteFile(outpath, data, 0666)
@@ -545,10 +582,17 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 		dependencies: []*compileJob{programJob},
 		result:       objfile,
 		run: func(*compileJob) error {
-			llvmBuf, err := machine.EmitToMemoryBuffer(mod, llvm.ObjectFile)
-			if err != nil {
-				return err
+			var llvmBuf llvm.MemoryBuffer
+			if config.UseThinLTO() {
+				llvmBuf = llvm.WriteThinLTOBitcodeToMemoryBuffer(mod)
+			} else {
+				var err error
+				llvmBuf, err = machine.EmitToMemoryBuffer(mod, llvm.ObjectFile)
+				if err != nil {
+					return err
+				}
 			}
+			defer llvmBuf.Dispose()
 			return ioutil.WriteFile(objfile, llvmBuf.Bytes(), 0666)
 		},
 	}
@@ -581,7 +625,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 		job := &compileJob{
 			description: "compile extra file " + path,
 			run: func(job *compileJob) error {
-				result, err := compileAndCacheCFile(abspath, dir, config.CFlags(), config.Options.PrintCommands)
+				result, err := compileAndCacheCFile(abspath, dir, config.CFlags(), config.UseThinLTO(), config.Options.PrintCommands)
 				job.result = result
 				return err
 			},
@@ -599,7 +643,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 			job := &compileJob{
 				description: "compile CGo file " + abspath,
 				run: func(job *compileJob) error {
-					result, err := compileAndCacheCFile(abspath, dir, pkg.CFlags, config.Options.PrintCommands)
+					result, err := compileAndCacheCFile(abspath, dir, pkg.CFlags, config.UseThinLTO(), config.Options.PrintCommands)
 					job.result = result
 					return err
 				},
@@ -614,7 +658,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 			job := &compileJob{
 				description: "compile CGo CPP file " + abspath,
 				run: func(job *compileJob) error {
-					result, err := compileAndCacheCFile(abspath, dir, flags, config.Options.PrintCommands)
+					result, err := compileAndCacheCFile(abspath, dir, flags, config.UseThinLTO(), config.Options.PrintCommands)
 					job.result = result
 					return err
 				},
@@ -682,6 +726,24 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 			}
 			if config.Options.PrintCommands != nil {
 				config.Options.PrintCommands(config.Target.Linker, ldflags...)
+			}
+			if config.UseThinLTO() {
+				ldflags = append(ldflags,
+					"--thinlto-cache-dir="+filepath.Join(cacheDir, "thinlto"),
+					"-plugin-opt=mcpu="+config.CPU(),
+					"-plugin-opt=O"+strconv.Itoa(optLevel),
+					"-plugin-opt=thinlto")
+				if config.CodeModel() != "default" {
+					ldflags = append(ldflags,
+						"-mllvm", "-code-model="+config.CodeModel())
+				}
+				if sizeLevel >= 2 {
+					// Workaround with roughly the same effect as
+					// https://reviews.llvm.org/D119342.
+					// Can hopefully be removed in LLVM 15.
+					ldflags = append(ldflags,
+						"-mllvm", "--rotation-max-header-size=0")
+				}
 			}
 			err = link(config.Target.Linker, ldflags...)
 			if err != nil {
@@ -813,7 +875,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 		if err != nil {
 			return err
 		}
-	case "esp32", "esp32c3", "esp8266":
+	case "esp32", "esp32-img", "esp32c3", "esp8266":
 		// Special format for the ESP family of chips (parsed by the ROM
 		// bootloader).
 		tmppath = filepath.Join(dir, "main"+outext)
@@ -845,6 +907,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	}
 
 	return action(BuildResult{
+		Executable: executable,
 		Binary:     tmppath,
 		MainDir:    lprogram.MainPkg().Dir,
 		ModuleRoot: moduleroot,
@@ -873,7 +936,7 @@ func optimizeProgram(mod llvm.Module, config *compileopts.Config) error {
 		}
 	}
 
-	if config.GOOS() != "darwin" {
+	if config.GOOS() != "darwin" && !config.UseThinLTO() {
 		transform.ApplyFunctionSections(mod) // -ffunction-sections
 	}
 

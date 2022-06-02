@@ -11,9 +11,8 @@
 	"ldflags": [
 		"--allow-undefined",
 		"--stack-first",
-		"--export-dynamic",
 		"--no-demangle"
 	],
-	"emulator":      ["wasmtime"],
+	"emulator":      "wasmtime {}",
 	"wasm-abi":      "generic"
 }

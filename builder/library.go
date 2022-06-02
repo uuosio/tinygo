@@ -24,8 +24,8 @@ type Library struct {
 	// cflags returns the C flags specific to this library
 	cflags func(target, headerPath string) []string
 
-	// The source directory, relative to TINYGOROOT.
-	sourceDir string
+	// The source directory.
+	sourceDir func() string
 
 	// The source files, relative to sourceDir.
 	librarySources func(target string) []string
@@ -103,6 +103,10 @@ func (l *Library) load(config *compileopts.Config, tmpdir string) (job *compileJ
 			if err != nil {
 				return nil, nil, err
 			}
+			err = os.Chmod(temporaryHeaderPath, 0o755) // TempDir uses 0o700 by default
+			if err != nil {
+				return nil, nil, err
+			}
 			err = os.Rename(temporaryHeaderPath, headerPath)
 			if err != nil {
 				switch {
@@ -149,13 +153,19 @@ func (l *Library) load(config *compileopts.Config, tmpdir string) (job *compileJ
 		}
 	}
 	if strings.HasPrefix(target, "arm") || strings.HasPrefix(target, "thumb") {
-		args = append(args, "-fshort-enums", "-fomit-frame-pointer", "-mfloat-abi=soft", "-fno-unwind-tables")
+		args = append(args, "-fshort-enums", "-fomit-frame-pointer", "-mfloat-abi=soft", "-fno-unwind-tables", "-fno-asynchronous-unwind-tables")
 	}
 	if strings.HasPrefix(target, "riscv32-") {
 		args = append(args, "-march=rv32imac", "-mabi=ilp32", "-fforce-enable-int128")
 	}
 	if strings.HasPrefix(target, "riscv64-") {
 		args = append(args, "-march=rv64gc", "-mabi=lp64")
+	}
+	if strings.HasPrefix(target, "xtensa") {
+		// Hack to work around an issue in the Xtensa port:
+		// https://github.com/espressif/llvm-project/issues/52
+		// Hopefully this will be fixed soon (LLVM 14).
+		args = append(args, "-D__ELF__")
 	}
 
 	var once sync.Once
@@ -182,10 +192,16 @@ func (l *Library) load(config *compileopts.Config, tmpdir string) (job *compileJ
 			if err != nil {
 				return err
 			}
+			err = os.Chmod(f.Name(), 0o644) // TempFile uses 0o600 by default
+			if err != nil {
+				return err
+			}
 			// Store this archive in the cache.
 			return os.Rename(f.Name(), archiveFilePath)
 		},
 	}
+
+	sourceDir := l.sourceDir()
 
 	// Create jobs to compile all sources. These jobs are depended upon by the
 	// archive job above, so must be run first.
@@ -195,7 +211,7 @@ func (l *Library) load(config *compileopts.Config, tmpdir string) (job *compileJ
 		for strings.HasPrefix(cleanpath, "../") {
 			cleanpath = cleanpath[3:]
 		}
-		srcpath := filepath.Join(goenv.Get("TINYGOROOT"), l.sourceDir, path)
+		srcpath := filepath.Join(sourceDir, path)
 		objpath := filepath.Join(dir, cleanpath+".o")
 		os.MkdirAll(filepath.Dir(objpath), 0o777)
 		objs = append(objs, objpath)
@@ -219,7 +235,7 @@ func (l *Library) load(config *compileopts.Config, tmpdir string) (job *compileJ
 	// (It could be done in parallel with creating the ar file, but it probably
 	// won't make much of a difference in speed).
 	if l.crt1Source != "" {
-		srcpath := filepath.Join(goenv.Get("TINYGOROOT"), l.sourceDir, l.crt1Source)
+		srcpath := filepath.Join(sourceDir, l.crt1Source)
 		job.dependencies = append(job.dependencies, &compileJob{
 			description: "compile " + srcpath,
 			run: func(*compileJob) error {

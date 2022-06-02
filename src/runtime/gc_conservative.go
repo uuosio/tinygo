@@ -14,7 +14,7 @@ package runtime
 // any free space, it will perform a garbage collection cycle and try again. If
 // it still cannot find any free space, it gives up.
 //
-// Every block has some metadata, which is stored at the beginning of the heap.
+// Every block has some metadata, which is stored at the end of the heap.
 // The four states are "free", "head", "tail", and "mark". During normal
 // operation, there are no marked blocks. Every allocated object starts with a
 // "head" and is followed by "tail" blocks. The reason for this distinction is
@@ -110,7 +110,11 @@ func (b gcBlock) pointer() unsafe.Pointer {
 
 // Return the address of the start of the allocated object.
 func (b gcBlock) address() uintptr {
-	return heapStart + uintptr(b)*bytesPerBlock
+	addr := heapStart + uintptr(b)*bytesPerBlock
+	if gcAsserts && addr > uintptr(metadataStart) {
+		runtimePanic("gc: block pointing inside metadata")
+	}
+	return addr
 }
 
 // findHead returns the head (first block) of an object, assuming the block
@@ -134,7 +138,7 @@ func (b gcBlock) findNext() gcBlock {
 	if b.state() == blockStateHead || b.state() == blockStateMark {
 		b++
 	}
-	for b.state() == blockStateTail {
+	for b.address() < uintptr(metadataStart) && b.state() == blockStateTail {
 		b++
 	}
 	return b
@@ -143,7 +147,7 @@ func (b gcBlock) findNext() gcBlock {
 // State returns the current block state.
 func (b gcBlock) state() blockState {
 	stateBytePtr := (*uint8)(unsafe.Pointer(uintptr(metadataStart) + uintptr(b/blocksPerStateByte)))
-	return blockState(*stateBytePtr>>((b%blocksPerStateByte)*2)) % 4
+	return blockState(*stateBytePtr>>((b%blocksPerStateByte)*stateBits)) & blockStateMask
 }
 
 // setState sets the current block to the given state, which must contain more
@@ -151,7 +155,7 @@ func (b gcBlock) state() blockState {
 // from head to mark.
 func (b gcBlock) setState(newState blockState) {
 	stateBytePtr := (*uint8)(unsafe.Pointer(uintptr(metadataStart) + uintptr(b/blocksPerStateByte)))
-	*stateBytePtr |= uint8(newState << ((b % blocksPerStateByte) * 2))
+	*stateBytePtr |= uint8(newState << ((b % blocksPerStateByte) * stateBits))
 	if gcAsserts && b.state() != newState {
 		runtimePanic("gc: setState() was not successful")
 	}
@@ -160,7 +164,7 @@ func (b gcBlock) setState(newState blockState) {
 // markFree sets the block state to free, no matter what state it was in before.
 func (b gcBlock) markFree() {
 	stateBytePtr := (*uint8)(unsafe.Pointer(uintptr(metadataStart) + uintptr(b/blocksPerStateByte)))
-	*stateBytePtr &^= uint8(blockStateMask << ((b % blocksPerStateByte) * 2))
+	*stateBytePtr &^= uint8(blockStateMask << ((b % blocksPerStateByte) * stateBits))
 	if gcAsserts && b.state() != blockStateFree {
 		runtimePanic("gc: markFree() was not successful")
 	}
@@ -174,7 +178,7 @@ func (b gcBlock) unmark() {
 	}
 	clearMask := blockStateMask ^ blockStateHead // the bits to clear from the state
 	stateBytePtr := (*uint8)(unsafe.Pointer(uintptr(metadataStart) + uintptr(b/blocksPerStateByte)))
-	*stateBytePtr &^= uint8(clearMask << ((b % blocksPerStateByte) * 2))
+	*stateBytePtr &^= uint8(clearMask << ((b % blocksPerStateByte) * stateBits))
 	if gcAsserts && b.state() != blockStateHead {
 		runtimePanic("gc: unmark() was not successful")
 	}
@@ -240,7 +244,7 @@ func calculateHeapAddresses() {
 	totalSize := heapEnd - heapStart
 
 	// Allocate some memory to keep 2 bits of information about every block.
-	metadataSize := totalSize / (blocksPerStateByte * bytesPerBlock)
+	metadataSize := (totalSize + blocksPerStateByte*bytesPerBlock) / (1 + blocksPerStateByte*bytesPerBlock)
 	metadataStart = unsafe.Pointer(heapEnd - metadataSize)
 
 	// Use the rest of the available memory as heap.
@@ -306,6 +310,13 @@ func alloc(size uintptr, layout unsafe.Pointer) unsafe.Pointer {
 			index = 0
 			// Reset numFreeBlocks as allocations cannot wrap.
 			numFreeBlocks = 0
+			// In rare cases, the initial heap might be so small that there are
+			// no blocks at all. In this case, it's better to jump back to the
+			// start of the loop and try again, until the GC realizes there is
+			// no memory and grows the heap.
+			// This can sometimes happen on WebAssembly, where the initial heap
+			// is created by whatever is left on the last memory page.
+			continue
 		}
 
 		// Is the block we're looking at free?

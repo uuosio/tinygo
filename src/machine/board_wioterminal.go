@@ -1,3 +1,4 @@
+//go:build wioterminal
 // +build wioterminal
 
 package machine
@@ -344,6 +345,8 @@ const (
 )
 
 var (
+	DefaultUART = UART1
+
 	UART1 = &sercomUSART2
 
 	// RTL8720D

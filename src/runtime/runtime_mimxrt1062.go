@@ -1,3 +1,4 @@
+//go:build mimxrt1062
 // +build mimxrt1062
 
 package runtime
@@ -118,11 +119,11 @@ func initPins() {
 }
 
 func initUART() {
-	machine.UART1.Configure(machine.UARTConfig{})
+	machine.Serial.Configure(machine.UARTConfig{})
 }
 
 func putchar(c byte) {
-	machine.UART1.WriteByte(c)
+	machine.Serial.WriteByte(c)
 }
 
 func exit(code int) {

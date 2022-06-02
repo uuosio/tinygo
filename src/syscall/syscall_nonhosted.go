@@ -1,6 +1,11 @@
+//go:build baremetal || js
 // +build baremetal js
 
 package syscall
+
+import (
+	"internal/itoa"
+)
 
 // Most code here has been copied from the Go sources:
 //   https://github.com/golang/go/blob/go1.12/src/syscall/syscall_js.go
@@ -22,7 +27,27 @@ const (
 	SIGTRAP
 	SIGQUIT
 	SIGTERM
+	SIGILL
+	SIGABRT
+	SIGBUS
+	SIGFPE
+	SIGSEGV
+	SIGPIPE
 )
+
+func (s Signal) Signal() {}
+
+func (s Signal) String() string {
+	if 0 <= s && int(s) < len(signals) {
+		str := signals[s]
+		if str != "" {
+			return str
+		}
+	}
+	return "signal " + itoa.Itoa(int(s))
+}
+
+var signals = [...]string{}
 
 // File system
 
@@ -45,6 +70,22 @@ const (
 	O_SYNC   = 010000
 
 	O_CLOEXEC = 0
+)
+
+// Dummy values to allow compiling tests
+// Dummy source: https://opensource.apple.com/source/xnu/xnu-7195.81.3/bsd/sys/mman.h.auto.html
+const (
+	PROT_NONE  = 0x00 // no permissions
+	PROT_READ  = 0x01 // pages can be read
+	PROT_WRITE = 0x02 // pages can be written
+	PROT_EXEC  = 0x04 // pages can be executed
+
+	MAP_SHARED  = 0x0001 // share changes
+	MAP_PRIVATE = 0x0002 // changes are private
+
+	MAP_FILE      = 0x0000 // map from file (default)
+	MAP_ANON      = 0x1000 // allocated from memory, swap space
+	MAP_ANONYMOUS = MAP_ANON
 )
 
 func runtime_envs() []string
@@ -139,6 +180,9 @@ type SysProcAttr struct {
 func Getgroups() ([]int, error)         { return []int{1}, nil }
 func Gettimeofday(tv *Timeval) error    { return ENOSYS }
 func Kill(pid int, signum Signal) error { return ENOSYS }
+func Pipe2(p []int, flags int) (err error) {
+	return ENOSYS // TODO
+}
 func Sendfile(outfd int, infd int, offset *int64, count int) (written int, err error) {
 	return 0, ENOSYS
 }
@@ -147,6 +191,14 @@ func StartProcess(argv0 string, argv []string, attr *ProcAttr) (pid int, handle 
 }
 func Wait4(pid int, wstatus *WaitStatus, options int, rusage *Rusage) (wpid int, err error) {
 	return 0, ENOSYS
+}
+
+func Mmap(fd int, offset int64, length int, prot int, flags int) (data []byte, err error) {
+	return nil, ENOSYS
+}
+
+func Munmap(b []byte) (err error) {
+	return ENOSYS
 }
 
 type Timeval struct {

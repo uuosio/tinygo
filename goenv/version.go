@@ -12,7 +12,13 @@ import (
 
 // Version of TinyGo.
 // Update this value before release of new version of software.
-const Version = "0.22.0"
+const Version = "0.23.0"
+
+var (
+	// This variable is set at build time using -ldflags parameters.
+	// See: https://stackoverflow.com/a/11355611
+	GitSha1 string
+)
 
 // GetGorootVersion returns the major and minor version for a given GOROOT path.
 // If the goroot cannot be determined, (0, 0) is returned.
@@ -52,9 +58,9 @@ func GorootVersionString(goroot string) (string, error) {
 		return string(data), nil
 
 	} else if data, err := ioutil.ReadFile(filepath.Join(
-		goroot, "src", "runtime", "internal", "sys", "zversion.go")); err == nil {
+		goroot, "src", "internal", "buildcfg", "zbootstrap.go")); err == nil {
 
-		r := regexp.MustCompile("const TheVersion = `(.*)`")
+		r := regexp.MustCompile("const version = `(.*)`")
 		matches := r.FindSubmatch(data)
 		if len(matches) != 2 {
 			return "", errors.New("Invalid go version output:\n" + string(data))

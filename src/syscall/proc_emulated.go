@@ -1,3 +1,4 @@
+//go:build baremetal || wasi || wasm || eosio
 // +build baremetal wasi wasm eosio
 
 // This file emulates some process-related functions that are only available

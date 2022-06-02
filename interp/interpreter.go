@@ -103,11 +103,6 @@ func (r *runner) run(fn *function, params []value, parentMem *memoryView, indent
 		}
 		switch inst.opcode {
 		case llvm.Ret:
-			t1 := time.Since(r.start)
-			if t1-t0 > time.Second {
-				// Provide some breadcrumbs for user trying to find their slow init functions.
-				fmt.Fprintln(os.Stderr, "interp: slow: startms", int(t0.Milliseconds()), "endms", int(t1.Milliseconds()), "func", fn.name)
-			}
 			const maxInterpSeconds = 180
 			if t0 > maxInterpSeconds*time.Second {
 				// Running for more than maxInterpSeconds seconds. This should never happen, but does.
@@ -497,9 +492,9 @@ func (r *runner) run(fn *function, params []value, parentMem *memoryView, indent
 				// Call a function with a definition available. Run it as usual,
 				// possibly trying to recover from it if it failed to execute.
 				if r.debug {
-					argStrings := make([]string, len(operands))
-					for i := range argStrings {
-						argStrings[i] = operands[i+1].String()
+					argStrings := make([]string, len(operands)-1)
+					for i, v := range operands[1:] {
+						argStrings[i] = v.String()
 					}
 					fmt.Fprintln(os.Stderr, indent+"call:", callFn.name+"("+strings.Join(argStrings, ", ")+")")
 				}

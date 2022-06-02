@@ -10,10 +10,6 @@
 [submodule "lib/cmsis-svd"]
 	path = lib/cmsis-svd
 	url = https://github.com/tinygo-org/cmsis-svd
-[submodule "lib/compiler-rt"]
-	path = lib/compiler-rt
-	url = https://github.com/llvm-mirror/compiler-rt.git
-	branch = release_80
 [submodule "lib/wasi-libc"]
 	path = lib/wasi-libc
 	url = https://github.com/WebAssembly/wasi-libc
@@ -41,3 +37,6 @@
 [submodule "lib/mingw-w64"]
 	path = lib/mingw-w64
 	url = https://github.com/mingw-w64/mingw-w64.git
+[submodule "lib/macos-minimal-sdk"]
+	path = lib/macos-minimal-sdk
+	url = https://github.com/aykevl/macos-minimal-sdk.git

@@ -1,3 +1,4 @@
+//go:build sam && atsamd51 && atsamd51j19
 // +build sam,atsamd51,atsamd51j19
 
 // Peripheral abstraction layer for the atsamd51.
@@ -26,6 +27,42 @@ var (
 	sercomSPIM4 = SPI{Bus: sam.SERCOM4_SPIM, SERCOM: 4}
 	sercomSPIM5 = SPI{Bus: sam.SERCOM5_SPIM, SERCOM: 5}
 )
+
+// setSERCOMClockGenerator sets the GCLK for sercom
+func setSERCOMClockGenerator(sercom uint8, gclk uint32) {
+	switch sercom {
+	case 0:
+		sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_SERCOM0_CORE].ClearBits(sam.GCLK_PCHCTRL_CHEN)
+		sam.MCLK.APBAMASK.SetBits(sam.MCLK_APBAMASK_SERCOM0_)
+		sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_SERCOM0_CORE].Set((gclk << sam.GCLK_PCHCTRL_GEN_Pos) |
+			sam.GCLK_PCHCTRL_CHEN)
+	case 1:
+		sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_SERCOM1_CORE].ClearBits(sam.GCLK_PCHCTRL_CHEN)
+		sam.MCLK.APBAMASK.SetBits(sam.MCLK_APBAMASK_SERCOM1_)
+		sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_SERCOM1_CORE].Set((gclk << sam.GCLK_PCHCTRL_GEN_Pos) |
+			sam.GCLK_PCHCTRL_CHEN)
+	case 2:
+		sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_SERCOM2_CORE].ClearBits(sam.GCLK_PCHCTRL_CHEN)
+		sam.MCLK.APBBMASK.SetBits(sam.MCLK_APBBMASK_SERCOM2_)
+		sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_SERCOM2_CORE].Set((gclk << sam.GCLK_PCHCTRL_GEN_Pos) |
+			sam.GCLK_PCHCTRL_CHEN)
+	case 3:
+		sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_SERCOM3_CORE].ClearBits(sam.GCLK_PCHCTRL_CHEN)
+		sam.MCLK.APBBMASK.SetBits(sam.MCLK_APBBMASK_SERCOM3_)
+		sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_SERCOM3_CORE].Set((gclk << sam.GCLK_PCHCTRL_GEN_Pos) |
+			sam.GCLK_PCHCTRL_CHEN)
+	case 4:
+		sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_SERCOM4_CORE].ClearBits(sam.GCLK_PCHCTRL_CHEN)
+		sam.MCLK.APBDMASK.SetBits(sam.MCLK_APBDMASK_SERCOM4_)
+		sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_SERCOM4_CORE].Set((gclk << sam.GCLK_PCHCTRL_GEN_Pos) |
+			sam.GCLK_PCHCTRL_CHEN)
+	case 5:
+		sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_SERCOM5_CORE].ClearBits(sam.GCLK_PCHCTRL_CHEN)
+		sam.MCLK.APBDMASK.SetBits(sam.MCLK_APBDMASK_SERCOM5_)
+		sam.GCLK.PCHCTRL[sam.PCHCTRL_GCLK_SERCOM5_CORE].Set((gclk << sam.GCLK_PCHCTRL_GEN_Pos) |
+			sam.GCLK_PCHCTRL_CHEN)
+	}
+}
 
 // This chip has five TCC peripherals, which have PWM as one feature.
 var (

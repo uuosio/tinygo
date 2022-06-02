@@ -18,6 +18,7 @@ import (
 // always be heap allocated.
 //
 // TODO: tune this, this is just a random value.
+// This value is also used in the compiler when translating ssa.Alloc nodes.
 const maxStackAlloc = 256
 
 // OptimizeAllocs tries to replace heap allocations with stack allocations
@@ -40,7 +41,7 @@ func OptimizeAllocs(mod llvm.Module, printAllocs *regexp.Regexp, logger func(tok
 
 	for _, heapalloc := range getUses(allocator) {
 		logAllocs := printAllocs != nil && printAllocs.MatchString(heapalloc.InstructionParent().Parent().Name())
-		if heapalloc.Operand(0).IsAConstant().IsNil() {
+		if heapalloc.Operand(0).IsAConstantInt().IsNil() {
 			// Do not allocate variable length arrays on the stack.
 			if logAllocs {
 				logAlloc(logger, heapalloc, "size is not constant")

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/google/shlex"
 	"github.com/tinygo-org/tinygo/goenv"
 )
 
@@ -176,6 +177,34 @@ func (c *Config) AutomaticStackSize() bool {
 	return false
 }
 
+// UseThinLTO returns whether ThinLTO should be used for the given target. Some
+// targets (such as wasm) are not yet supported.
+// We should try and remove as many exceptions as possible in the future, so
+// that this optimization can be applied in more places.
+func (c *Config) UseThinLTO() bool {
+	parts := strings.Split(c.Triple(), "-")
+	if parts[0] == "wasm32" {
+		// wasm-ld doesn't seem to support ThinLTO yet.
+		return false
+	}
+	if parts[0] == "avr" || parts[0] == "xtensa" {
+		// These use external (GNU) linkers which might perhaps support ThinLTO
+		// through a plugin, but it's too much hassle to set up.
+		return false
+	}
+	if len(parts) >= 2 && strings.HasPrefix(parts[2], "macos") {
+		// We use an external linker here at the moment.
+		return false
+	}
+	if len(parts) >= 2 && parts[2] == "windows" {
+		// Linker error (undefined runtime.trackedGlobalsBitmap) when linking
+		// for Windows. Disable it for now until that's figured out and fixed.
+		return false
+	}
+	// Other architectures support ThinLTO.
+	return true
+}
+
 // RP2040BootPatch returns whether the RP2040 boot patch should be applied that
 // calculates and patches in the checksum for the 2nd stage bootloader.
 func (c *Config) RP2040BootPatch() bool {
@@ -199,8 +228,13 @@ func MuslArchitecture(triple string) string {
 // a precompiled libc shipped with a TinyGo build, or a libc path in the cache
 // directory (which might not yet be built).
 func (c *Config) LibcPath(name string) (path string, precompiled bool) {
+	archname := c.Triple()
+	if c.CPU() != "" {
+		archname += "-" + c.CPU()
+	}
+
 	// Try to load a precompiled library.
-	precompiledDir := filepath.Join(goenv.Get("TINYGOROOT"), "pkg", c.Triple(), name)
+	precompiledDir := filepath.Join(goenv.Get("TINYGOROOT"), "pkg", archname, name)
 	if _, err := os.Stat(precompiledDir); err == nil {
 		// Found a precompiled library for this OS/architecture. Return the path
 		// directly.
@@ -209,13 +243,30 @@ func (c *Config) LibcPath(name string) (path string, precompiled bool) {
 
 	// No precompiled library found. Determine the path name that will be used
 	// in the build cache.
-	var outname string
-	if c.CPU() != "" {
-		outname = name + "-" + c.Triple() + "-" + c.CPU()
-	} else {
-		outname = name + "-" + c.Triple()
+	return filepath.Join(goenv.Get("GOCACHE"), name+"-"+archname), false
+}
+
+// DefaultBinaryExtension returns the default extension for binaries, such as
+// .exe, .wasm, or no extension (depending on the target).
+func (c *Config) DefaultBinaryExtension() string {
+	parts := strings.Split(c.Triple(), "-")
+	if parts[0] == "wasm32" {
+		// WebAssembly files always have the .wasm file extension.
+		return ".wasm"
 	}
-	return filepath.Join(goenv.Get("GOCACHE"), outname), false
+	if len(parts) >= 3 && parts[2] == "windows" {
+		// Windows uses .exe.
+		return ".exe"
+	}
+	if len(parts) >= 3 && parts[2] == "unknown" {
+		// There appears to be a convention to use the .elf file extension for
+		// ELF files intended for microcontrollers. I'm not aware of the origin
+		// of this, it's just something that is used by many projects.
+		// I think it's a good tradition, so let's keep it.
+		return ".elf"
+	}
+	// Linux, MacOS, etc, don't use a file extension. Use it as a fallback.
+	return ""
 }
 
 // CFlags returns the flags to pass to the C compiler. This is necessary for CGo
@@ -226,12 +277,18 @@ func (c *Config) CFlags() []string {
 		cflags = append(cflags, strings.ReplaceAll(flag, "{root}", goenv.Get("TINYGOROOT")))
 	}
 	switch c.Target.Libc {
+	case "darwin-libSystem":
+		root := goenv.Get("TINYGOROOT")
+		cflags = append(cflags,
+			"--sysroot="+filepath.Join(root, "lib/macos-minimal-sdk/src"),
+		)
 	case "picolibc":
 		root := goenv.Get("TINYGOROOT")
 		picolibcDir := filepath.Join(root, "lib", "picolibc", "newlib", "libc")
 		path, _ := c.LibcPath("picolibc")
 		cflags = append(cflags,
 			"--sysroot="+path,
+			"-isystem", filepath.Join(path, "include"), // necessary for Xtensa
 			"-isystem", filepath.Join(picolibcDir, "include"),
 			"-isystem", filepath.Join(picolibcDir, "tinystdio"),
 		)
@@ -352,6 +409,13 @@ func (c *Config) BinaryFormat(ext string) string {
 			return c.Target.BinaryFormat
 		}
 		return "bin"
+	case ".img":
+		// Image file. Only defined for the ESP32 at the moment, where it is a
+		// full (runnable) image that can be used in the Espressif QEMU fork.
+		if c.Target.BinaryFormat != "" {
+			return c.Target.BinaryFormat + "-img"
+		}
+		return "bin"
 	case ".hex":
 		// Similar to bin, but includes the start address and is thus usually a
 		// better format.
@@ -452,13 +516,43 @@ func (c *Config) WasmAbi() string {
 	return c.Target.WasmAbi
 }
 
-// Emulator returns the emulator target config
-func (c *Config) Emulator() []string {
-	var emulator []string
-	for _, s := range c.Target.Emulator {
-		emulator = append(emulator, strings.ReplaceAll(s, "{root}", goenv.Get("TINYGOROOT")))
+// EmulatorName is a shorthand to get the command for this emulator, something
+// like qemu-system-arm or simavr.
+func (c *Config) EmulatorName() string {
+	parts := strings.SplitN(c.Target.Emulator, " ", 2)
+	if len(parts) > 1 {
+		return parts[0]
 	}
-	return emulator
+	return ""
+}
+
+// EmulatorFormat returns the binary format for the emulator and the associated
+// file extension. An empty string means to pass directly whatever the linker
+// produces directly without conversion (usually ELF format).
+func (c *Config) EmulatorFormat() (format, fileExt string) {
+	switch {
+	case strings.Contains(c.Target.Emulator, "{img}"):
+		return "img", ".img"
+	default:
+		return "", ""
+	}
+}
+
+// Emulator returns a ready-to-run command to run the given binary in an
+// emulator. Give it the format (returned by EmulatorFormat()) and the path to
+// the compiled binary.
+func (c *Config) Emulator(format, binary string) ([]string, error) {
+	parts, err := shlex.Split(c.Target.Emulator)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse emulator command: %w", err)
+	}
+	var emulator []string
+	for _, s := range parts {
+		s = strings.ReplaceAll(s, "{root}", goenv.Get("TINYGOROOT"))
+		s = strings.ReplaceAll(s, "{"+format+"}", binary)
+		emulator = append(emulator, s)
+	}
+	return emulator, nil
 }
 
 type TestConfig struct {

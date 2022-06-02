@@ -21,12 +21,10 @@ func init() {
 // Stdin, Stdout, and Stderr are open Files pointing to the standard input,
 // standard output, and standard error file descriptors.
 var (
-	Stdin  = &File{unixFileHandle(syscall.Stdin), "/dev/stdin"}
-	Stdout = &File{unixFileHandle(syscall.Stdout), "/dev/stdout"}
-	Stderr = &File{unixFileHandle(syscall.Stderr), "/dev/stderr"}
+	Stdin  = NewFile(uintptr(syscall.Stdin), "/dev/stdin")
+	Stdout = NewFile(uintptr(syscall.Stdout), "/dev/stdout")
+	Stderr = NewFile(uintptr(syscall.Stderr), "/dev/stderr")
 )
-
-const DevNull = "/dev/null"
 
 // isOS indicates whether we're running on a real operating system with
 // filesystem support.
@@ -87,9 +85,9 @@ func (fs unixFilesystem) Remove(path string) error {
 	return &PathError{Op: "remove", Path: path, Err: e}
 }
 
-func (fs unixFilesystem) OpenFile(path string, flag int, perm FileMode) (FileHandle, error) {
+func (fs unixFilesystem) OpenFile(path string, flag int, perm FileMode) (uintptr, error) {
 	fp, err := syscall.Open(path, flag, uint32(perm))
-	return unixFileHandle(fp), handleSyscallError(err)
+	return uintptr(fp), handleSyscallError(err)
 }
 
 // unixFileHandle is a Unix file pointer with associated methods that implement
@@ -118,6 +116,10 @@ func (f unixFileHandle) Write(b []byte) (n int, err error) {
 // Close closes the File, rendering it unusable for I/O.
 func (f unixFileHandle) Close() error {
 	return handleSyscallError(syscall.Close(syscallFd(f)))
+}
+
+func (f unixFileHandle) Fd() uintptr {
+	return uintptr(f)
 }
 
 // Chmod changes the mode of the named file to mode.

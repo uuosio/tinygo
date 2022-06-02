@@ -1,3 +1,4 @@
+//go:build windows || darwin || (linux && !baremetal)
 // +build windows darwin linux,!baremetal
 
 package os_test
@@ -12,6 +13,17 @@ import (
 	"testing"
 	"time"
 )
+
+var dot = []string{
+	"dir.go",
+	"env.go",
+	"errors.go",
+	"file.go",
+	"os_test.go",
+	"types.go",
+	"stat_darwin.go",
+	"stat_linux.go",
+}
 
 func randomName() string {
 	// fastrand() does not seem available here, so fake it
@@ -60,6 +72,10 @@ func equal(name1, name2 string) (r bool) {
 }
 
 func TestFstat(t *testing.T) {
+	if runtime.GOARCH == "386" || runtime.GOARCH == "arm" {
+		t.Log("TODO: implement fstat for 386 and arm")
+		return
+	}
 	sfname := "TestFstat"
 	path := TempDir() + "/" + sfname
 	payload := writeFile(t, path, O_CREATE|O_TRUNC|O_RDWR, "Hello")
@@ -235,5 +251,23 @@ func TestRenameFailed(t *testing.T) {
 		t.Errorf("rename %q, %q: expected error, got nil", from, to)
 	default:
 		t.Errorf("rename %q, %q: expected %T, got %T %v", from, to, new(LinkError), err, err)
+	}
+}
+
+func TestUserHomeDir(t *testing.T) {
+	dir, err := UserHomeDir()
+	if dir == "" && err == nil {
+		t.Fatal("UserHomeDir returned an empty string but no error")
+	}
+	if err != nil {
+		t.Logf("UserHomeDir failed: %v", err)
+		return
+	}
+	fi, err := Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fi.IsDir() {
+		t.Fatalf("dir %s is not directory; type = %v", dir, fi.Mode())
 	}
 }

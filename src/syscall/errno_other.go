@@ -1,3 +1,4 @@
+//go:build !wasi && !darwin && !eosio
 // +build !wasi,!darwin,!eosio
 
 package syscall

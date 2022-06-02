@@ -1,3 +1,4 @@
+//go:build darwin || (linux && !baremetal)
 // +build darwin linux,!baremetal
 
 // Copyright 2016 The Go Authors. All rights reserved.
@@ -13,6 +14,20 @@ import (
 // Sync is a stub, not yet implemented
 func (f *File) Sync() error {
 	return ErrNotImplemented
+}
+
+// Stat returns the FileInfo structure describing file.
+// If there is an error, it will be of type *PathError.
+func (f *File) Stat() (FileInfo, error) {
+	var fs fileStat
+	err := ignoringEINTR(func() error {
+		return syscall.Fstat(int(f.handle.(unixFileHandle)), &fs.sys)
+	})
+	if err != nil {
+		return nil, &PathError{Op: "fstat", Path: f.name, Err: err}
+	}
+	fillFileStatFromSys(&fs, f.name)
+	return &fs, nil
 }
 
 // statNolog stats a file with no test logging.

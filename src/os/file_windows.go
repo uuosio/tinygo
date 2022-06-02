@@ -13,6 +13,8 @@ import (
 	"unicode/utf16"
 )
 
+const DevNull = "NUL"
+
 type syscallFd = syscall.Handle
 
 // Symlink is a stub, it is not implemented.
@@ -33,20 +35,23 @@ func rename(oldname, newname string) error {
 	return nil
 }
 
+type file struct {
+	handle FileHandle
+	name   string
+}
+
+func NewFile(fd uintptr, name string) *File {
+	return &File{&file{unixFileHandle(fd), name}}
+}
+
 func Pipe() (r *File, w *File, err error) {
 	var p [2]syscall.Handle
 	e := handleSyscallError(syscall.Pipe(p[:]))
 	if e != nil {
 		return nil, nil, err
 	}
-	r = &File{
-		handle: unixFileHandle(p[0]),
-		name:   "|0",
-	}
-	w = &File{
-		handle: unixFileHandle(p[1]),
-		name:   "|1",
-	}
+	r = NewFile(uintptr(p[0]), "|0")
+	w = NewFile(uintptr(p[1]), "|1")
 	return
 }
 
@@ -80,20 +85,6 @@ func (f unixFileHandle) ReadAt(b []byte, offset int64) (n int, err error) {
 func (f unixFileHandle) Seek(offset int64, whence int) (int64, error) {
 	newoffset, err := syscall.Seek(syscallFd(f), offset, whence)
 	return newoffset, handleSyscallError(err)
-}
-
-// Seek sets the offset for the next Read or Write on file to offset, interpreted
-// according to whence: 0 means relative to the origin of the file, 1 means
-// relative to the current offset, and 2 means relative to the end.
-// It returns the new offset and an error, if any.
-// The behavior of Seek on a file opened with O_APPEND is not specified.
-//
-// If f is a directory, the behavior of Seek varies by operating
-// system; you can seek to the beginning of the directory on Unix-like
-// operating systems, but not on Windows.
-// TODO: move this back to file.go once syscall.seek is implemented on 386 and arm.
-func (f *File) Seek(offset int64, whence int) (ret int64, err error) {
-	return f.handle.Seek(offset, whence)
 }
 
 // isWindowsNulName reports whether name is os.DevNull ('NUL') on Windows.

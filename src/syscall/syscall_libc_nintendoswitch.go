@@ -1,6 +1,11 @@
+//go:build nintendoswitch
 // +build nintendoswitch
 
 package syscall
+
+import (
+	"internal/itoa"
+)
 
 // A Signal is a number describing a process signal.
 // It implements the os.Signal interface.
@@ -15,6 +20,20 @@ const (
 	SIGQUIT
 	SIGTERM
 )
+
+func (s Signal) Signal() {}
+
+func (s Signal) String() string {
+	if 0 <= s && int(s) < len(signals) {
+		str := signals[s]
+		if str != "" {
+			return str
+		}
+	}
+	return "signal " + itoa.Itoa(int(s))
+}
+
+var signals = [...]string{}
 
 // File system
 
@@ -43,4 +62,8 @@ var libcErrno uintptr
 
 func getErrno() error {
 	return Errno(libcErrno)
+}
+
+func Pipe2(p []int, flags int) (err error) {
+	return ENOSYS // TODO
 }

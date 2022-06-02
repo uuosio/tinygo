@@ -12,6 +12,7 @@ package os
 import (
 	"errors"
 	"io"
+	"runtime"
 	"syscall"
 )
 
@@ -23,6 +24,9 @@ const (
 	SEEK_CUR int = io.SeekCurrent
 	SEEK_END int = io.SeekEnd
 )
+
+// lstat is overridden in tests.
+var lstat = Lstat
 
 // Mkdir creates a directory. If the operation fails, it will return an error of
 // type *PathError.
@@ -61,17 +65,6 @@ func Remove(path string) error {
 	return nil
 }
 
-// RemoveAll is a stub, it is not implemented.
-func RemoveAll(path string) error {
-	return ErrNotImplemented
-}
-
-// File represents an open file descriptor.
-type File struct {
-	handle FileHandle
-	name   string
-}
-
 // Name returns the name of the file with which it was opened.
 func (f *File) Name() string {
 	return f.name
@@ -88,7 +81,7 @@ func OpenFile(name string, flag int, perm FileMode) (*File, error) {
 	if err != nil {
 		return nil, &PathError{"open", name, err}
 	}
-	return &File{name: name, handle: handle}, nil
+	return NewFile(handle, name), nil
 }
 
 // Open opens the file named for reading.
@@ -170,23 +163,36 @@ func (f *File) Close() (err error) {
 	return
 }
 
-// Readdir is a stub, not yet implemented
-func (f *File) Readdir(n int) ([]FileInfo, error) {
-	return nil, &PathError{"readdir", f.name, ErrNotImplemented}
-}
-
-// Readdirnames is a stub, not yet implemented
-func (f *File) Readdirnames(n int) (names []string, err error) {
-	return nil, &PathError{"readdirnames", f.name, ErrNotImplemented}
+// Seek sets the offset for the next Read or Write on file to offset, interpreted
+// according to whence: 0 means relative to the origin of the file, 1 means
+// relative to the current offset, and 2 means relative to the end.
+// It returns the new offset and an error, if any.
+// The behavior of Seek on a file opened with O_APPEND is not specified.
+//
+// If f is a directory, the behavior of Seek varies by operating
+// system; you can seek to the beginning of the directory on Unix-like
+// operating systems, but not on Windows.
+func (f *File) Seek(offset int64, whence int) (ret int64, err error) {
+	return f.handle.Seek(offset, whence)
 }
 
 func (f *File) SyscallConn() (syscall.RawConn, error) {
 	return nil, ErrNotImplemented
 }
 
+// fd is an internal interface that is used to try a type assertion in order to
+// call the Fd() method of the underlying file handle if it is implemented.
+type fd interface {
+	Fd() uintptr
+}
+
 // Fd returns the file handle referencing the open file.
 func (f *File) Fd() uintptr {
-	panic("unimplemented: os.file.Fd()")
+	handle, ok := f.handle.(fd)
+	if ok {
+		return handle.Fd()
+	}
+	return 0
 }
 
 // Truncate is a stub, not yet implemented
@@ -253,4 +259,30 @@ func Getwd() (string, error) {
 // permissions.
 func TempDir() string {
 	return tempDir()
+}
+
+// UserHomeDir returns the current user's home directory.
+//
+// On Unix, including macOS, it returns the $HOME environment variable.
+// On Windows, it returns %USERPROFILE%.
+// On Plan 9, it returns the $home environment variable.
+func UserHomeDir() (string, error) {
+	env, enverr := "HOME", "$HOME"
+	switch runtime.GOOS {
+	case "windows":
+		env, enverr = "USERPROFILE", "%userprofile%"
+	case "plan9":
+		env, enverr = "home", "$home"
+	}
+	if v := Getenv(env); v != "" {
+		return v, nil
+	}
+	// On some geese the home directory is not always defined.
+	switch runtime.GOOS {
+	case "android":
+		return "/sdcard", nil
+	case "ios":
+		return "/", nil
+	}
+	return "", errors.New(enverr + " is not defined")
 }

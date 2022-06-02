@@ -1,6 +1,6 @@
 ; ModuleID = 'interface.go'
 source_filename = "interface.go"
-target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128-ni:1:10:20"
+target datalayout = "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20"
 target triple = "wasm32-unknown-wasi"
 
 %runtime.typecodeID = type { %runtime.typecodeID*, i32, %runtime.interfaceMethodInfo*, %runtime.typecodeID*, i32 }
@@ -128,5 +128,5 @@ declare %runtime._string @"interface:{Error:func:{}{basic:string}}.Error$invoke"
 attributes #0 = { nounwind }
 attributes #1 = { "tinygo-methods"="reflect/methods.Error() string" }
 attributes #2 = { "tinygo-methods"="reflect/methods.String() string" }
-attributes #3 = { "tinygo-invoke"="main.$methods.foo(int) byte" "tinygo-methods"="reflect/methods.String() string; main.$methods.foo(int) byte" }
+attributes #3 = { "tinygo-invoke"="main.$methods.foo(int) uint8" "tinygo-methods"="reflect/methods.String() string; main.$methods.foo(int) uint8" }
 attributes #4 = { "tinygo-invoke"="reflect/methods.Error() string" "tinygo-methods"="reflect/methods.Error() string" }

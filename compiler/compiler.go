@@ -234,10 +234,15 @@ func Sizes(machine llvm.TargetMachine) types.Sizes {
 		panic("unknown pointer size")
 	}
 
+	// Construct a complex128 type because that's likely the type with the
+	// biggest alignment on most/all ABIs.
+	ctx := llvm.NewContext()
+	defer ctx.Dispose()
+	complex128Type := ctx.StructType([]llvm.Type{ctx.DoubleType(), ctx.DoubleType()}, false)
 	return &stdSizes{
 		IntSize:  int64(intWidth / 8),
 		PtrSize:  int64(targetData.PointerSize()),
-		MaxAlign: int64(targetData.PrefTypeAlignment(targetData.IntPtrType())),
+		MaxAlign: int64(targetData.ABITypeAlignment(complex128Type)),
 	}
 }
 
@@ -952,10 +957,10 @@ func (b *builder) createFunction() {
 			} else {
 				fieldOffsets := b.expandFormalParamOffsets(llvmType)
 				for i, field := range fields {
-					expr := b.dibuilder.CreateExpression([]int64{
-						0x1000,                     // DW_OP_LLVM_fragment
-						int64(fieldOffsets[i]) * 8, // offset in bits
-						int64(b.targetData.TypeAllocSize(field.Type())) * 8, // size in bits
+					expr := b.dibuilder.CreateExpression([]uint64{
+						0x1000,              // DW_OP_LLVM_fragment
+						fieldOffsets[i] * 8, // offset in bits
+						b.targetData.TypeAllocSize(field.Type()) * 8, // size in bits
 					})
 					b.dibuilder.InsertValueAtEnd(field, dbgParam, expr, loc, entryBlock)
 				}
@@ -1228,7 +1233,7 @@ func (b *builder) createBuiltin(argTypes []types.Type, argValues []llvm.Value, c
 	case "cap":
 		value := argValues[0]
 		var llvmCap llvm.Value
-		switch argTypes[0].(type) {
+		switch argTypes[0].Underlying().(type) {
 		case *types.Chan:
 			llvmCap = b.createRuntimeCall("chanCap", []llvm.Value{value}, "cap")
 		case *types.Slice:
@@ -1469,7 +1474,7 @@ func (b *builder) createFunctionCall(instr *ssa.CallCommon) (llvm.Value, error) 
 			return b.emitSV64Call(instr.Args)
 		case strings.HasPrefix(name, "(device/riscv.CSR)."):
 			return b.emitCSROperation(instr)
-		case strings.HasPrefix(name, "syscall.Syscall"):
+		case strings.HasPrefix(name, "syscall.Syscall") || strings.HasPrefix(name, "syscall.RawSyscall"):
 			return b.createSyscall(instr)
 		case strings.HasPrefix(name, "syscall.rawSyscallNoError"):
 			return b.createRawSyscallNoError(instr)
@@ -1498,6 +1503,14 @@ func (b *builder) createFunctionCall(instr *ssa.CallCommon) (llvm.Value, error) 
 		case *ssa.Function:
 			// Regular function call. No context is necessary.
 			context = llvm.Undef(b.i8ptrType)
+			if info.variadic && len(fn.Params) == 0 {
+				// This matches Clang, see: https://godbolt.org/z/Gqv49xKMq
+				// Eventually we might be able to eliminate this special case
+				// entirely. For details, see:
+				// https://discourse.llvm.org/t/rfc-enabling-wstrict-prototypes-by-default-in-c/60521
+				fnType := llvm.FunctionType(callee.Type().ElementType().ReturnType(), nil, false)
+				callee = llvm.ConstBitCast(callee, llvm.PointerType(fnType, b.funcPtrAddrSpace))
+			}
 		case *ssa.MakeClosure:
 			// A call on a func value, but the callee is trivial to find. For
 			// example: immediately applied functions.
@@ -1583,7 +1596,11 @@ func (c *compilerContext) maxSliceSize(elementType llvm.Type) uint64 {
 	// Determine the maximum allowed size for a slice. The biggest possible
 	// pointer (starting from 0) would be maxPointerValue*sizeof(elementType) so
 	// divide by the element type to get the real maximum size.
-	maxSize := maxPointerValue / c.targetData.TypeAllocSize(elementType)
+	elementSize := c.targetData.TypeAllocSize(elementType)
+	if elementSize == 0 {
+		elementSize = 1
+	}
+	maxSize := maxPointerValue / elementSize
 
 	// len(slice) is an int. Make sure the length remains small enough to fit in
 	// an int.
@@ -1605,8 +1622,9 @@ func (b *builder) createExpr(expr ssa.Value) (llvm.Value, error) {
 	switch expr := expr.(type) {
 	case *ssa.Alloc:
 		typ := b.getLLVMType(expr.Type().Underlying().(*types.Pointer).Elem())
-		if expr.Heap {
-			size := b.targetData.TypeAllocSize(typ)
+		size := b.targetData.TypeAllocSize(typ)
+		// Move all "large" allocations to the heap.  This value is also transform.maxStackAlloc.
+		if expr.Heap || size > 256 {
 			// Calculate ^uintptr(0)
 			maxSize := llvm.ConstNot(llvm.ConstInt(b.uintptrType, 0, false)).ZExtValue()
 			if size > maxSize {

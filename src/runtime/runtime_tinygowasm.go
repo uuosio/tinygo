@@ -1,3 +1,4 @@
+//go:build tinygo.wasm && !eosio
 // +build tinygo.wasm,!eosio
 
 package runtime

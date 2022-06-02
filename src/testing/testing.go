@@ -15,6 +15,8 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Testing flags.
@@ -58,6 +60,10 @@ type common struct {
 	name     string    // Name of test or benchmark.
 	start    time.Time // Time test or benchmark started
 	duration time.Duration
+
+	tempDir    string
+	tempDirErr error
+	tempDirSeq int32
 }
 
 // Short reports whether the -test.short flag is set.
@@ -97,6 +103,7 @@ func fmtDuration(d time.Duration) string {
 
 // TB is the interface common to T and B.
 type TB interface {
+	Cleanup(func())
 	Error(args ...interface{})
 	Errorf(format string, args ...interface{})
 	Fail()
@@ -104,6 +111,7 @@ type TB interface {
 	Failed() bool
 	Fatal(args ...interface{})
 	Fatalf(format string, args ...interface{})
+	Helper()
 	Log(args ...interface{})
 	Logf(format string, args ...interface{})
 	Name() string
@@ -111,8 +119,7 @@ type TB interface {
 	SkipNow()
 	Skipf(format string, args ...interface{})
 	Skipped() bool
-	Helper()
-	Parallel()
+	TempDir() string
 }
 
 var _ TB = (*T)(nil)
@@ -258,6 +265,70 @@ func (c *common) Cleanup(f func()) {
 	c.cleanups = append(c.cleanups, f)
 }
 
+// TempDir returns a temporary directory for the test to use.
+// The directory is automatically removed by Cleanup when the test and
+// all its subtests complete.
+// Each subsequent call to t.TempDir returns a unique directory;
+// if the directory creation fails, TempDir terminates the test by calling Fatal.
+func (c *common) TempDir() string {
+	// Use a single parent directory for all the temporary directories
+	// created by a test, each numbered sequentially.
+	var nonExistent bool
+	if c.tempDir == "" { // Usually the case with js/wasm
+		nonExistent = true
+	} else {
+		_, err := os.Stat(c.tempDir)
+		nonExistent = os.IsNotExist(err)
+		if err != nil && !nonExistent {
+			c.Fatalf("TempDir: %v", err)
+		}
+	}
+
+	if nonExistent {
+		c.Helper()
+
+		// Drop unusual characters (such as path separators or
+		// characters interacting with globs) from the directory name to
+		// avoid surprising os.MkdirTemp behavior.
+		mapper := func(r rune) rune {
+			if r < utf8.RuneSelf {
+				const allowed = "!#$%&()+,-.=@^_{}~ "
+				if '0' <= r && r <= '9' ||
+					'a' <= r && r <= 'z' ||
+					'A' <= r && r <= 'Z' {
+					return r
+				}
+				if strings.ContainsRune(allowed, r) {
+					return r
+				}
+			} else if unicode.IsLetter(r) || unicode.IsNumber(r) {
+				return r
+			}
+			return -1
+		}
+		pattern := strings.Map(mapper, c.Name())
+		c.tempDir, c.tempDirErr = os.MkdirTemp("", pattern)
+		if c.tempDirErr == nil {
+			c.Cleanup(func() {
+				if err := os.RemoveAll(c.tempDir); err != nil {
+					c.Errorf("TempDir RemoveAll cleanup: %v", err)
+				}
+			})
+		}
+	}
+
+	if c.tempDirErr != nil {
+		c.Fatalf("TempDir: %v", c.tempDirErr)
+	}
+	seq := c.tempDirSeq
+	c.tempDirSeq++
+	dir := fmt.Sprintf("%s%c%03d", c.tempDir, os.PathSeparator, seq)
+	if err := os.Mkdir(dir, 0777); err != nil {
+		c.Fatalf("TempDir: %v", err)
+	}
+	return dir
+}
+
 // runCleanup is called at the end of the test.
 func (c *common) runCleanup() {
 	for {
@@ -275,7 +346,7 @@ func (c *common) runCleanup() {
 }
 
 // Parallel is not implemented, it is only provided for compatibility.
-func (c *common) Parallel() {
+func (t *T) Parallel() {
 	// Unimplemented.
 }
 
@@ -357,15 +428,6 @@ type M struct {
 
 type testDeps interface {
 	MatchString(pat, str string) (bool, error)
-}
-
-func MainStart(deps interface{}, tests []InternalTest, benchmarks []InternalBenchmark, examples []InternalExample) *M {
-	Init()
-	return &M{
-		Tests:      tests,
-		Benchmarks: benchmarks,
-		deps:       deps.(testDeps),
-	}
 }
 
 // Run runs the tests. It returns an exit code to pass to os.Exit.
