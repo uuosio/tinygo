@@ -74,6 +74,8 @@ jobs:
       - name: Build wasi-libc
         if: steps.cache-wasi-libc.outputs.cache-hit != 'true'
         run: make wasi-libc
+      - name: Build eosio-libs
+        run: make eosio-libs
       - name: Test TinyGo
         shell: bash
         run: make test GOTESTFLAGS="-v -short"

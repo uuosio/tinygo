@@ -18,9 +18,15 @@ jobs:
         with:
           go-version: '1.18.1'
       - uses: brechtm/setup-scoop@v2
+        with:
+          scoop_update: 'false'
+#https://github.com/ScoopInstaller/Scoop/issues/4917
       - name: Install Dependencies
         shell: bash
         run: |
+          scoop bucket rm main
+          scoop bucket add main
+          scoop bucket add extras
           scoop install ninja binaryen
       - name: Checkout
         uses: actions/checkout@v2
@@ -73,6 +79,8 @@ jobs:
       - name: Build wasi-libc
         if: steps.cache-wasi-libc.outputs.cache-hit != 'true'
         run: make wasi-libc
+      - name: Build eosio-libs
+        run: make eosio-libs
       - name: Install wasmtime
         run: |
           scoop install wasmtime
