@@ -97,6 +97,12 @@ jobs:
         with:
           name: release-double-zipped
           path: build/tinygo.darwin-amd64.tar.gz
+      - name: release-tinygo
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            build/tinygo.darwin-amd64.tar.gz
       - name: Smoke tests
         shell: bash
         run: make smoketest TINYGO=$(PWD)/build/tinygo AVR=0

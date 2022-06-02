@@ -101,6 +101,12 @@ jobs:
           path: |
             /tmp/tinygo.linux-amd64.tar.gz
             /tmp/tinygo_amd64.deb
+      - name: release-tinygo
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            /tmp/tinygo.linux-amd64.tar.gz
   test-linux-build:
     # Test the binaries built in the build-linux job by running the smoke tests.
     runs-on: ubuntu-latest

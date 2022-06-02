@@ -12,6 +12,9 @@ on:
 jobs:
   build-windows:
     runs-on: windows-2022
+    strategy:
+      matrix:
+        os: ['windows-2022']
     steps:
       - name: Install Go
         uses: actions/setup-go@v2
@@ -92,7 +95,7 @@ jobs:
       - name: Make release artifact
         shell: bash
         working-directory: build/release
-        run: 7z -tzip a release.zip tinygo
+        run: 7z -tzip a release-${{ matrix.os }}.zip tinygo
       - name: Publish release artifact
         # Note: this release artifact is double-zipped, see:
         # https://github.com/actions/upload-artifact/issues/39
@@ -103,7 +106,13 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: release-double-zipped
-          path: build/release/release.zip
+          path: build/release/release-${{ matrix.os }}.zip
+      - name: release-tinygo
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            build/release/release-${{ matrix.os }}.zip
       - name: Smoke tests
         shell: bash
         run: make smoketest TINYGO=$(PWD)/build/tinygo AVR=0 XTENSA=0
