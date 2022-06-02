@@ -6,6 +6,8 @@ on:
     branches:
       - dev
       - release
+    tags:
+      - "v*.*.*"
 
 jobs:
   build-linux:
