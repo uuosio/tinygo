@@ -9,8 +9,8 @@ func (mi *{{.StructName}}DB) Store(v *{{.StructName}}, payer chain.Name) {
 	mi.MultiIndexInterface.Store(v, payer)
 }
 
-func (mi *{{.StructName}}DB) Get(id uint64) (*database.Iterator, *{{.StructName}}) {
-	it, data := mi.MultiIndexInterface.Get(id)
+func (mi *{{.StructName}}DB) GetByKey(id uint64) (*database.Iterator, *{{.StructName}}) {
+	it, data := mi.MultiIndexInterface.GetByKey(id)
 	if !it.IsOk() {
 		return it, nil
 	}
