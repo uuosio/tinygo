@@ -131,27 +131,27 @@ type FunctionInfo struct {
 }
 
 type CodeGenerator struct {
-	dirName         string
-	currentFile     string
-	contractName    string
-	fset            *token.FileSet
-	codeFile        *os.File
-	actions         []ActionInfo
-	structs         []*StructInfo
-	tables          []*TableInfo
-	specialAbiTypes []SpecialAbiType
-	structMap       map[string]*StructInfo
-
-	hasMainFunc        bool
-	abiStructsMap      map[string]*StructInfo
-	PackerMap          map[string]*StructInfo
-	VariantMap         map[string]*StructInfo
-	actionMap          map[string]bool
+	dirName            string
+	currentFile        string
+	contractName       string
 	contractStructName string
 	hasNewContractFunc bool
-	abiTypeMap         map[string]bool
-	indexTypeMap       map[string]bool
-	functionMap        map[string][]FunctionInfo
+	fset               *token.FileSet
+	codeFile           *os.File
+	actions            []ActionInfo
+	structs            []*StructInfo
+	tables             []*TableInfo
+	specialAbiTypes    []SpecialAbiType
+	structMap          map[string]*StructInfo
+
+	hasMainFunc   bool
+	abiStructsMap map[string]*StructInfo
+	PackerMap     map[string]*StructInfo
+	VariantMap    map[string]*StructInfo
+	actionMap     map[string]bool
+	abiTypeMap    map[string]bool
+	indexTypeMap  map[string]bool
+	functionMap   map[string][]FunctionInfo
 }
 
 type ABITable struct {
@@ -935,14 +935,14 @@ func (t *CodeGenerator) parseFunc(f *ast.FuncDecl) error {
 	}
 
 	if _, ok := t.actionMap[actionName]; ok {
-		errMsg := fmt.Sprintf("Dumplicated action name: %s", actionName)
+		errMsg := fmt.Sprintf("Duplicate action name: %s", actionName)
 		return t.newError(doc.Pos(), errMsg)
 	}
 
 	ignore := false
 	if len(parts) == 3 {
 		if parts[2] != "ignore" {
-			errMsg := fmt.Sprintf("Bad action, %s not recognized as a valid paramater", parts[2])
+			errMsg := fmt.Sprintf("Bad action, %s not recognized as a valid parameter", parts[2])
 			return errors.New(errMsg)
 		}
 		ignore = true
@@ -1207,6 +1207,20 @@ func (t *CodeGenerator) genStruct(structName string, members []StructMember) {
 	t.writeCode("}")
 }
 
+func (t *CodeGenerator) hasFinalizeFunction() bool {
+	funcs, ok := t.functionMap[t.contractStructName]
+	if !ok {
+		return false
+	}
+
+	for _, v := range funcs {
+		if v.Name == "Finalize" {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *CodeGenerator) hasPackFunction(structName string) bool {
 	funcs, ok := t.functionMap[structName]
 	if !ok {
@@ -1427,7 +1441,9 @@ func (t *CodeGenerator) GenCode(generatedFile string) error {
 	}
 
 	t.writeCode(cMainCode)
-
+	if t.hasFinalizeFunction() {
+		t.writeCode("    defer contract.Finalize()")
+	}
 	t.writeCode("    if receiver == firstReceiver {")
 	t.GenActionCode()
 	t.writeCode("    }")
