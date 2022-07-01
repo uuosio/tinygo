@@ -647,7 +647,7 @@ func (t *CodeGenerator) parseTableIndex(field *ast.Field, info *TableInfo) error
 	indexText := comment.Text
 	indexInfo := splitAndTrimSpace(comment.Text, ":")
 	//parse comment like://primary:t.primary
-	if len(indexInfo) <= 1 {
+	if len(indexInfo) < 1 {
 		return nil
 	}
 
@@ -657,7 +657,20 @@ func (t *CodeGenerator) parseTableIndex(field *ast.Field, info *TableInfo) error
 			errMsg := fmt.Sprintf("Singleton table `%s` can not define primary key explicitly", info.TableName)
 			return t.newError(comment.Pos(), errMsg)
 		}
-		if len(indexInfo) == 2 {
+
+		if len(indexInfo) == 1 {
+			ty, _ := parseType(field)
+			if len(field.Names) != 1 {
+				errMsg := fmt.Sprintf("primary field can not have multiple names", info.TableName)
+				return t.newError(comment.Pos(), errMsg)
+			}
+			if ty == "uint64" {
+				info.PrimaryKey = fmt.Sprintf("t.%s", field.Names[0].Name)
+			} else {
+				errMsg := fmt.Sprintf("unrecognized primary format:")
+				return t.newError(comment.Pos(), errMsg)
+			}
+		} else if len(indexInfo) == 2 {
 			primary := indexInfo[1]
 			if primary == "" {
 				return t.newError(comment.Pos(), "Empty primary key in struct "+info.StructInfo.StructName)
@@ -671,6 +684,31 @@ func (t *CodeGenerator) parseTableIndex(field *ast.Field, info *TableInfo) error
 			errMsg := fmt.Sprintf("Invalid primary key in struct %s: %s", info.StructInfo.StructName, indexText)
 			return t.newError(comment.Pos(), errMsg)
 		}
+	} else if dbType == "//secondary" {
+		name := field.Names[0].Name
+		ty, _ := parseType(field)
+		var dbType string
+		var idx string
+		if ty == "uint64" {
+			dbType = "IdxDB64"
+			idx = "IDX64"
+		} else if ty == "chain.Uint128" {
+			dbType = "IdxDB128"
+			idx = "IDX128"
+		} else if ty == "chain.Uint256" {
+			dbType = "IdxDB256"
+			idx = "IDX256"
+		} else if ty == "float64" {
+			dbType = "IdxDBFloat64"
+			idx = "IDXFloat64"
+		} else if ty == "chain.Float128" {
+			dbType = "IdxDBFloat128"
+			idx = "IDXFloat128"
+		}
+		getter := fmt.Sprintf("t.%s", name)
+		setter := fmt.Sprintf("t.%s = %%v", name)
+		indexInfo := SecondaryIndexInfo{idx, dbType, name, getter, setter}
+		info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
 	} else if _, ok := t.indexTypeMap[dbType[2:]]; ok {
 		if info.Singleton {
 			errMsg := fmt.Sprintf("Singleton table `%s` can not define secondary key explictly", info.TableName)
