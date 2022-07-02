@@ -8,6 +8,9 @@ on:
       - release
     tags:
       - "v*.*.*"
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-windows:
@@ -23,13 +26,9 @@ jobs:
       - uses: brechtm/setup-scoop@v2
         with:
           scoop_update: 'false'
-#https://github.com/ScoopInstaller/Scoop/issues/4917
       - name: Install Dependencies
         shell: bash
         run: |
-          scoop bucket rm main
-          scoop bucket add main
-          scoop bucket add extras
           scoop install ninja binaryen
       - name: Checkout
         uses: actions/checkout@v2
@@ -46,7 +45,7 @@ jobs:
         uses: actions/cache@v2
         id: cache-llvm-source
         with:
-          key: llvm-source-14-windows-v1
+          key: llvm-source-14-windows-v2
           path: |
             llvm-project/clang/lib/Headers
             llvm-project/clang/include
@@ -60,7 +59,7 @@ jobs:
         uses: actions/cache@v2
         id: cache-llvm-build
         with:
-          key: llvm-build-14-windows-v1
+          key: llvm-build-14-windows-v2
           path: llvm-build
       - name: Build LLVM
         if: steps.cache-llvm-build.outputs.cache-hit != 'true'
@@ -70,14 +69,14 @@ jobs:
           rm -rf llvm-project
           make llvm-source
           # build!
-          make llvm-build
+          make llvm-build CCACHE=OFF
           # Remove unnecessary object files (to reduce cache size).
           find llvm-build -name CMakeFiles -prune -exec rm -r '{}' \;
       - name: Cache wasi-libc sysroot
         uses: actions/cache@v2
         id: cache-wasi-libc
         with:
-          key: wasi-libc-sysroot-v3
+          key: wasi-libc-sysroot-v4
           path: lib/wasi-libc/sysroot
       - name: Build wasi-libc
         if: steps.cache-wasi-libc.outputs.cache-hit != 'true'
@@ -91,6 +90,7 @@ jobs:
         shell: bash
         run: make test GOTESTFLAGS="-v -short"
       - name: Build TinyGo release tarball
+        shell: bash
         run: make build/release -j4
       - name: Make release artifact
         shell: bash

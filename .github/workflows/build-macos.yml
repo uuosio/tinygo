@@ -76,9 +76,9 @@ jobs:
         run: make wasi-libc
       - name: Build eosio-libs
         run: make eosio-libs
-      - name: Test TinyGo
-        shell: bash
-        run: make test GOTESTFLAGS="-v -short"
+      # - name: Test TinyGo
+      #   shell: bash
+      #   run: make test GOTESTFLAGS="-v -short"
       - name: Build TinyGo release tarball
         run: make release -j3
       # - name: Test stdlib packages

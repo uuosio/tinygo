@@ -1,4 +1,4 @@
-VERSION=v0.23.1
+VERSION=v0.23.2
 TARGET=eosio
 git push $TARGET :refs/tags/$VERSION
 git tag -d $VERSION

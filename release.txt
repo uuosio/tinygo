@@ -1,2 +1,2 @@
-Merge tinygo v0.23.0
-
+1. Simplify secondary key declaration 
+2. Add support for calling Finalize method in main function
