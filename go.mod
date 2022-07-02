@@ -13,7 +13,7 @@ require (
 	github.com/google/shlex v0.0.0-20181106134648-c34317bd91bf
 	github.com/marcinbor85/gohex v0.0.0-20200531091804-343a4b548892
 	github.com/mattn/go-colorable v0.1.9
-	github.com/uuosio/chain v0.1.8
+	github.com/uuosio/chain v0.1.13
 	go.bug.st/serial v1.1.3
 	golang.org/x/sys v0.0.0-20220114195835-da31bd327af9
 	golang.org/x/tools v0.1.11
