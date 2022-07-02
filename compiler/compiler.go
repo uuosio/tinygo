@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"go/types"
 	"math/bits"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -19,6 +20,10 @@ import (
 	"golang.org/x/tools/go/ssa"
 	"tinygo.org/x/go-llvm"
 )
+
+var typeParamUnderlyingType = func(t types.Type) types.Type {
+	return t
+}
 
 func init() {
 	llvm.InitializeAllTargets()
@@ -76,6 +81,7 @@ type compilerContext struct {
 	program          *ssa.Program
 	diagnostics      []error
 	astComments      map[string]*ast.CommentGroup
+	embedGlobals     map[string][]*loader.EmbedFile
 	pkg              *types.Package
 	packageDir       string // directory for this package
 	runtimePkg       *types.Package
@@ -137,6 +143,8 @@ type builder struct {
 	currentBlock      *ssa.BasicBlock
 	phis              []phiNode
 	deferPtr          llvm.Value
+	deferFrame        llvm.Value
+	landingpad        llvm.BasicBlock
 	difunc            llvm.Metadata
 	dilocals          map[*types.Var]llvm.Metadata
 	initInlinedAt     llvm.Metadata            // fake inlinedAt position
@@ -250,6 +258,7 @@ func Sizes(machine llvm.TargetMachine) types.Sizes {
 func CompilePackage(moduleName string, pkg *loader.Package, ssaPkg *ssa.Package, machine llvm.TargetMachine, config *Config, dumpSSA bool) (llvm.Module, []error) {
 	c := newCompilerContext(moduleName, machine, config, dumpSSA)
 	c.packageDir = pkg.OriginalDir()
+	c.embedGlobals = pkg.EmbedGlobals
 	c.pkg = pkg.Pkg
 	c.runtimePkg = ssaPkg.Prog.ImportedPackage("runtime").Pkg
 	c.program = ssaPkg.Prog
@@ -301,6 +310,7 @@ func CompilePackage(moduleName string, pkg *loader.Package, ssaPkg *ssa.Package,
 			}),
 		)
 		c.dibuilder.Finalize()
+		c.dibuilder.Destroy()
 	}
 
 	return c.mod, c.diagnostics
@@ -331,6 +341,7 @@ func (c *compilerContext) getLLVMType(goType types.Type) llvm.Type {
 // makeLLVMType creates a LLVM type for a Go type. Don't call this, use
 // getLLVMType instead.
 func (c *compilerContext) makeLLVMType(goType types.Type) llvm.Type {
+	goType = typeParamUnderlyingType(goType)
 	switch typ := goType.(type) {
 	case *types.Array:
 		elemType := c.getLLVMType(typ.Elem())
@@ -440,6 +451,7 @@ func (c *compilerContext) getDIType(typ types.Type) llvm.Metadata {
 // createDIType creates a new DWARF type. Don't call this function directly,
 // call getDIType instead.
 func (c *compilerContext) createDIType(typ types.Type) llvm.Metadata {
+	typ = typeParamUnderlyingType(typ)
 	llvmType := c.getLLVMType(typ)
 	sizeInBytes := c.targetData.TypeAllocSize(llvmType)
 	switch typ := typ.(type) {
@@ -773,7 +785,12 @@ func (c *compilerContext) createPackage(irbuilder llvm.Builder, pkg *ssa.Package
 			// Create the function definition.
 			b := newBuilder(c, irbuilder, member)
 			if member.Blocks == nil {
-				continue // external function
+				// Try to define this as an intrinsic function.
+				b.defineIntrinsicFunction()
+				// It might not be an intrinsic function but simply an external
+				// function (defined via //go:linkname). Leave it undefined in
+				// that case.
+				continue
 			}
 			b.createFunction()
 		case *ssa.Type:
@@ -790,6 +807,9 @@ func (c *compilerContext) createPackage(irbuilder llvm.Builder, pkg *ssa.Package
 			for _, method := range methods {
 				// Parse this method.
 				fn := pkg.Prog.MethodValue(method)
+				if fn == nil {
+					continue // probably a generic method
+				}
 				if fn.Blocks == nil {
 					continue // external function
 				}
@@ -814,7 +834,9 @@ func (c *compilerContext) createPackage(irbuilder llvm.Builder, pkg *ssa.Package
 			// Global variable.
 			info := c.getGlobalInfo(member)
 			global := c.getGlobal(member)
-			if !info.extern {
+			if files, ok := c.embedGlobals[member.Name()]; ok {
+				c.createEmbedGlobal(member, global, files)
+			} else if !info.extern {
 				global.SetInitializer(llvm.ConstNull(global.Type().ElementType()))
 				global.SetVisibility(llvm.HiddenVisibility)
 				if info.section != "" {
@@ -848,10 +870,155 @@ func (c *compilerContext) createPackage(irbuilder llvm.Builder, pkg *ssa.Package
 	}
 }
 
-// createFunction builds the LLVM IR implementation for this function. The
-// function must not yet be defined, otherwise this function will create a
-// diagnostic.
-func (b *builder) createFunction() {
+// createEmbedGlobal creates an initializer for a //go:embed global variable.
+func (c *compilerContext) createEmbedGlobal(member *ssa.Global, global llvm.Value, files []*loader.EmbedFile) {
+	switch typ := member.Type().(*types.Pointer).Elem().Underlying().(type) {
+	case *types.Basic:
+		// String type.
+		if typ.Kind() != types.String {
+			// This is checked at the AST level, so should be unreachable.
+			panic("expected a string type")
+		}
+		if len(files) != 1 {
+			c.addError(member.Pos(), fmt.Sprintf("//go:embed for a string should be given exactly one file, got %d", len(files)))
+			return
+		}
+		strObj := c.getEmbedFileString(files[0])
+		global.SetInitializer(strObj)
+		global.SetVisibility(llvm.HiddenVisibility)
+
+	case *types.Slice:
+		if typ.Elem().Underlying().(*types.Basic).Kind() != types.Byte {
+			// This is checked at the AST level, so should be unreachable.
+			panic("expected a byte slice")
+		}
+		if len(files) != 1 {
+			c.addError(member.Pos(), fmt.Sprintf("//go:embed for a string should be given exactly one file, got %d", len(files)))
+			return
+		}
+		file := files[0]
+		bufferValue := c.ctx.ConstString(string(file.Data), false)
+		bufferGlobal := llvm.AddGlobal(c.mod, bufferValue.Type(), c.pkg.Path()+"$embedslice")
+		bufferGlobal.SetInitializer(bufferValue)
+		bufferGlobal.SetLinkage(llvm.InternalLinkage)
+		bufferGlobal.SetAlignment(1)
+		slicePtr := llvm.ConstInBoundsGEP(bufferGlobal, []llvm.Value{
+			llvm.ConstInt(c.uintptrType, 0, false),
+			llvm.ConstInt(c.uintptrType, 0, false),
+		})
+		sliceLen := llvm.ConstInt(c.uintptrType, file.Size, false)
+		sliceObj := c.ctx.ConstStruct([]llvm.Value{slicePtr, sliceLen, sliceLen}, false)
+		global.SetInitializer(sliceObj)
+		global.SetVisibility(llvm.HiddenVisibility)
+
+	case *types.Struct:
+		// Assume this is an embed.FS struct:
+		// https://cs.opensource.google/go/go/+/refs/tags/go1.18.2:src/embed/embed.go;l=148
+		// It looks like this:
+		//   type FS struct {
+		//       files *file
+		//   }
+
+		// Make a slice of the files, as they will appear in the binary. They
+		// are sorted in a special way to allow for binary searches, see
+		// src/embed/embed.go for details.
+		dirset := map[string]struct{}{}
+		var allFiles []*loader.EmbedFile
+		for _, file := range files {
+			allFiles = append(allFiles, file)
+			dirname := file.Name
+			for {
+				dirname, _ = path.Split(path.Clean(dirname))
+				if dirname == "" {
+					break
+				}
+				if _, ok := dirset[dirname]; ok {
+					break
+				}
+				dirset[dirname] = struct{}{}
+				allFiles = append(allFiles, &loader.EmbedFile{
+					Name: dirname,
+				})
+			}
+		}
+		sort.Slice(allFiles, func(i, j int) bool {
+			dir1, name1 := path.Split(path.Clean(allFiles[i].Name))
+			dir2, name2 := path.Split(path.Clean(allFiles[j].Name))
+			if dir1 != dir2 {
+				return dir1 < dir2
+			}
+			return name1 < name2
+		})
+
+		// Make the backing array for the []files slice. This is a LLVM global.
+		embedFileStructType := c.getLLVMType(typ.Field(0).Type().(*types.Pointer).Elem().(*types.Slice).Elem())
+		var fileStructs []llvm.Value
+		for _, file := range allFiles {
+			fileStruct := llvm.ConstNull(embedFileStructType)
+			name := c.createConst(ssa.NewConst(constant.MakeString(file.Name), types.Typ[types.String]))
+			fileStruct = llvm.ConstInsertValue(fileStruct, name, []uint32{0}) // "name" field
+			if file.Hash != "" {
+				data := c.getEmbedFileString(file)
+				fileStruct = llvm.ConstInsertValue(fileStruct, data, []uint32{1}) // "data" field
+			}
+			fileStructs = append(fileStructs, fileStruct)
+		}
+		sliceDataInitializer := llvm.ConstArray(embedFileStructType, fileStructs)
+		sliceDataGlobal := llvm.AddGlobal(c.mod, sliceDataInitializer.Type(), c.pkg.Path()+"$embedfsfiles")
+		sliceDataGlobal.SetInitializer(sliceDataInitializer)
+		sliceDataGlobal.SetLinkage(llvm.InternalLinkage)
+		sliceDataGlobal.SetGlobalConstant(true)
+		sliceDataGlobal.SetUnnamedAddr(true)
+		sliceDataGlobal.SetAlignment(c.targetData.ABITypeAlignment(sliceDataInitializer.Type()))
+
+		// Create the slice object itself.
+		// Because embed.FS refers to it as *[]embed.file instead of a plain
+		// []embed.file, we have to store this as a global.
+		slicePtr := llvm.ConstInBoundsGEP(sliceDataGlobal, []llvm.Value{
+			llvm.ConstInt(c.uintptrType, 0, false),
+			llvm.ConstInt(c.uintptrType, 0, false),
+		})
+		sliceLen := llvm.ConstInt(c.uintptrType, uint64(len(fileStructs)), false)
+		sliceInitializer := c.ctx.ConstStruct([]llvm.Value{slicePtr, sliceLen, sliceLen}, false)
+		sliceGlobal := llvm.AddGlobal(c.mod, sliceInitializer.Type(), c.pkg.Path()+"$embedfsslice")
+		sliceGlobal.SetInitializer(sliceInitializer)
+		sliceGlobal.SetLinkage(llvm.InternalLinkage)
+		sliceGlobal.SetGlobalConstant(true)
+		sliceGlobal.SetUnnamedAddr(true)
+		sliceGlobal.SetAlignment(c.targetData.ABITypeAlignment(sliceInitializer.Type()))
+
+		// Define the embed.FS struct. It has only one field: the files (as a
+		// *[]embed.file).
+		globalInitializer := llvm.ConstNull(c.getLLVMType(member.Type().(*types.Pointer).Elem()))
+		globalInitializer = llvm.ConstInsertValue(globalInitializer, sliceGlobal, []uint32{0})
+		global.SetInitializer(globalInitializer)
+		global.SetVisibility(llvm.HiddenVisibility)
+		global.SetAlignment(c.targetData.ABITypeAlignment(globalInitializer.Type()))
+	}
+}
+
+// getEmbedFileString returns the (constant) string object with the contents of
+// the given file. This is a llvm.Value of a regular Go string.
+func (c *compilerContext) getEmbedFileString(file *loader.EmbedFile) llvm.Value {
+	dataGlobalName := "embed/file_" + file.Hash
+	dataGlobal := c.mod.NamedGlobal(dataGlobalName)
+	if dataGlobal.IsNil() {
+		dataGlobalType := llvm.ArrayType(c.ctx.Int8Type(), int(file.Size))
+		dataGlobal = llvm.AddGlobal(c.mod, dataGlobalType, dataGlobalName)
+	}
+	strPtr := llvm.ConstInBoundsGEP(dataGlobal, []llvm.Value{
+		llvm.ConstInt(c.uintptrType, 0, false),
+		llvm.ConstInt(c.uintptrType, 0, false),
+	})
+	strLen := llvm.ConstInt(c.uintptrType, file.Size, false)
+	return llvm.ConstNamedStruct(c.getLLVMRuntimeType("_string"), []llvm.Value{strPtr, strLen})
+}
+
+// Start defining a function so that it can be filled with instructions: load
+// parameters, create basic blocks, and set up debug information.
+// This is separated out from createFunction() so that it is also usable to
+// define compiler intrinsics like the atomic operations in sync/atomic.
+func (b *builder) createFunctionStart() {
 	if b.DumpSSA {
 		fmt.Printf("\nfunc %s:\n", b.fn)
 	}
@@ -921,7 +1088,16 @@ func (b *builder) createFunction() {
 		b.blockEntries[block] = llvmBlock
 		b.blockExits[block] = llvmBlock
 	}
-	entryBlock := b.blockEntries[b.fn.Blocks[0]]
+	var entryBlock llvm.BasicBlock
+	if len(b.fn.Blocks) != 0 {
+		// Normal functions have an entry block.
+		entryBlock = b.blockEntries[b.fn.Blocks[0]]
+	} else {
+		// This function isn't defined in Go SSA. It is probably a compiler
+		// intrinsic (like an atomic operation). Create the entry block
+		// manually.
+		entryBlock = b.ctx.AddBasicBlock(b.llvmFn, "entry")
+	}
 	b.SetInsertPointAtEnd(entryBlock)
 
 	if b.fn.Synthetic == "package initializer" {
@@ -996,6 +1172,13 @@ func (b *builder) createFunction() {
 		// them.
 		b.deferInitFunc()
 	}
+}
+
+// createFunction builds the LLVM IR implementation for this function. The
+// function must not yet be defined, otherwise this function will create a
+// diagnostic.
+func (b *builder) createFunction() {
+	b.createFunctionStart()
 
 	// Fill blocks with instructions.
 	for _, block := range b.fn.DomPreorder() {
@@ -1041,6 +1224,12 @@ func (b *builder) createFunction() {
 		if b.fn.Name() == "init" && len(block.Instrs) == 0 {
 			b.CreateRetVoid()
 		}
+	}
+
+	if b.hasDeferFrame() {
+		// Create the landing pad block, where execution continues after a
+		// panic.
+		b.createLandingPad()
 	}
 
 	// Resolve phi nodes
@@ -1170,9 +1359,12 @@ func (b *builder) createInstruction(instr ssa.Instruction) {
 		b.createMapUpdate(mapType.Key(), m, key, value, instr.Pos())
 	case *ssa.Panic:
 		value := b.getValue(instr.X)
-		b.createRuntimeCall("_panic", []llvm.Value{value}, "")
+		b.createRuntimeInvoke("_panic", []llvm.Value{value}, "")
 		b.CreateUnreachable()
 	case *ssa.Return:
+		if b.hasDeferFrame() {
+			b.createRuntimeCall("destroyDeferFrame", []llvm.Value{b.deferFrame}, "")
+		}
 		if len(instr.Results) == 0 {
 			b.CreateRetVoid()
 		} else if len(instr.Results) == 1 {
@@ -1361,7 +1553,13 @@ func (b *builder) createBuiltin(argTypes []types.Type, argValues []llvm.Value, c
 		cplx := argValues[0]
 		return b.CreateExtractValue(cplx, 0, "real"), nil
 	case "recover":
-		return b.createRuntimeCall("_recover", nil, ""), nil
+		useParentFrame := uint64(0)
+		if b.hasDeferFrame() {
+			// recover() should return the panic value of the parent function,
+			// not of the current function.
+			useParentFrame = 1
+		}
+		return b.createRuntimeCall("_recover", []llvm.Value{llvm.ConstInt(b.ctx.Int1Type(), useParentFrame, false)}, ""), nil
 	case "ssa:wrapnilchk":
 		// TODO: do an actual nil check?
 		return argValues[0], nil
@@ -1455,10 +1653,6 @@ func (b *builder) createFunctionCall(instr *ssa.CallCommon) (llvm.Value, error) 
 				break
 			}
 			return ret, nil
-		case name == "runtime.memcpy" || name == "runtime.memmove" || name == "reflect.memcpy":
-			return b.createMemoryCopyCall(fn, instr.Args)
-		case name == "runtime.memzero":
-			return b.createMemoryZeroCall(instr.Args)
 		case name == "math.Ceil" || name == "math.Floor" || name == "math.Sqrt" || name == "math.Trunc":
 			result, ok := b.createMathOp(instr)
 			if ok {
@@ -1478,18 +1672,12 @@ func (b *builder) createFunctionCall(instr *ssa.CallCommon) (llvm.Value, error) 
 			return b.createSyscall(instr)
 		case strings.HasPrefix(name, "syscall.rawSyscallNoError"):
 			return b.createRawSyscallNoError(instr)
-		case strings.HasPrefix(name, "runtime/volatile.Load"):
-			return b.createVolatileLoad(instr)
-		case strings.HasPrefix(name, "runtime/volatile.Store"):
-			return b.createVolatileStore(instr)
-		case strings.HasPrefix(name, "sync/atomic."):
-			val, ok := b.createAtomicOp(instr)
-			if ok {
-				// This call could be lowered as an atomic operation.
-				return val, nil
+		case name == "runtime.supportsRecover":
+			supportsRecover := uint64(0)
+			if b.supportsRecover() {
+				supportsRecover = 1
 			}
-			// This call couldn't be lowered as an atomic operation, it's
-			// probably something else. Continue as usual.
+			return llvm.ConstInt(b.ctx.Int1Type(), supportsRecover, false), nil
 		case name == "runtime/interrupt.New":
 			return b.createInterruptGlobal(instr)
 		}
@@ -1552,7 +1740,7 @@ func (b *builder) createFunctionCall(instr *ssa.CallCommon) (llvm.Value, error) 
 		params = append(params, context)
 	}
 
-	return b.createCall(callee, params, ""), nil
+	return b.createInvoke(callee, params, ""), nil
 }
 
 // getValue returns the LLVM value of a constant, function value, global, or
@@ -2503,42 +2691,41 @@ func (b *builder) createBinOp(op token.Token, typ, ytyp types.Type, x, y llvm.Va
 }
 
 // createConst creates a LLVM constant value from a Go constant.
-func (b *builder) createConst(expr *ssa.Const) llvm.Value {
+func (c *compilerContext) createConst(expr *ssa.Const) llvm.Value {
 	switch typ := expr.Type().Underlying().(type) {
 	case *types.Basic:
-		llvmType := b.getLLVMType(typ)
+		llvmType := c.getLLVMType(typ)
 		if typ.Info()&types.IsBoolean != 0 {
-			b := constant.BoolVal(expr.Value)
 			n := uint64(0)
-			if b {
+			if constant.BoolVal(expr.Value) {
 				n = 1
 			}
 			return llvm.ConstInt(llvmType, n, false)
 		} else if typ.Info()&types.IsString != 0 {
 			str := constant.StringVal(expr.Value)
-			strLen := llvm.ConstInt(b.uintptrType, uint64(len(str)), false)
+			strLen := llvm.ConstInt(c.uintptrType, uint64(len(str)), false)
 			var strPtr llvm.Value
 			if str != "" {
-				objname := b.pkg.Path() + "$string"
-				global := llvm.AddGlobal(b.mod, llvm.ArrayType(b.ctx.Int8Type(), len(str)), objname)
-				global.SetInitializer(b.ctx.ConstString(str, false))
+				objname := c.pkg.Path() + "$string"
+				global := llvm.AddGlobal(c.mod, llvm.ArrayType(c.ctx.Int8Type(), len(str)), objname)
+				global.SetInitializer(c.ctx.ConstString(str, false))
 				global.SetLinkage(llvm.InternalLinkage)
 				global.SetGlobalConstant(true)
 				global.SetUnnamedAddr(true)
 				global.SetAlignment(1)
-				zero := llvm.ConstInt(b.ctx.Int32Type(), 0, false)
-				strPtr = b.CreateInBoundsGEP(global, []llvm.Value{zero, zero}, "")
+				zero := llvm.ConstInt(c.ctx.Int32Type(), 0, false)
+				strPtr = llvm.ConstInBoundsGEP(global, []llvm.Value{zero, zero})
 			} else {
-				strPtr = llvm.ConstNull(b.i8ptrType)
+				strPtr = llvm.ConstNull(c.i8ptrType)
 			}
-			strObj := llvm.ConstNamedStruct(b.getLLVMRuntimeType("_string"), []llvm.Value{strPtr, strLen})
+			strObj := llvm.ConstNamedStruct(c.getLLVMRuntimeType("_string"), []llvm.Value{strPtr, strLen})
 			return strObj
 		} else if typ.Kind() == types.UnsafePointer {
 			if !expr.IsNil() {
 				value, _ := constant.Uint64Val(constant.ToInt(expr.Value))
-				return llvm.ConstIntToPtr(llvm.ConstInt(b.uintptrType, value, false), b.i8ptrType)
+				return llvm.ConstIntToPtr(llvm.ConstInt(c.uintptrType, value, false), c.i8ptrType)
 			}
-			return llvm.ConstNull(b.i8ptrType)
+			return llvm.ConstNull(c.i8ptrType)
 		} else if typ.Info()&types.IsUnsigned != 0 {
 			n, _ := constant.Uint64Val(constant.ToInt(expr.Value))
 			return llvm.ConstInt(llvmType, n, false)
@@ -2549,18 +2736,18 @@ func (b *builder) createConst(expr *ssa.Const) llvm.Value {
 			n, _ := constant.Float64Val(expr.Value)
 			return llvm.ConstFloat(llvmType, n)
 		} else if typ.Kind() == types.Complex64 {
-			r := b.createConst(ssa.NewConst(constant.Real(expr.Value), types.Typ[types.Float32]))
-			i := b.createConst(ssa.NewConst(constant.Imag(expr.Value), types.Typ[types.Float32]))
-			cplx := llvm.Undef(b.ctx.StructType([]llvm.Type{b.ctx.FloatType(), b.ctx.FloatType()}, false))
-			cplx = b.CreateInsertValue(cplx, r, 0, "")
-			cplx = b.CreateInsertValue(cplx, i, 1, "")
+			r := c.createConst(ssa.NewConst(constant.Real(expr.Value), types.Typ[types.Float32]))
+			i := c.createConst(ssa.NewConst(constant.Imag(expr.Value), types.Typ[types.Float32]))
+			cplx := llvm.Undef(c.ctx.StructType([]llvm.Type{c.ctx.FloatType(), c.ctx.FloatType()}, false))
+			cplx = llvm.ConstInsertValue(cplx, r, []uint32{0})
+			cplx = llvm.ConstInsertValue(cplx, i, []uint32{1})
 			return cplx
 		} else if typ.Kind() == types.Complex128 {
-			r := b.createConst(ssa.NewConst(constant.Real(expr.Value), types.Typ[types.Float64]))
-			i := b.createConst(ssa.NewConst(constant.Imag(expr.Value), types.Typ[types.Float64]))
-			cplx := llvm.Undef(b.ctx.StructType([]llvm.Type{b.ctx.DoubleType(), b.ctx.DoubleType()}, false))
-			cplx = b.CreateInsertValue(cplx, r, 0, "")
-			cplx = b.CreateInsertValue(cplx, i, 1, "")
+			r := c.createConst(ssa.NewConst(constant.Real(expr.Value), types.Typ[types.Float64]))
+			i := c.createConst(ssa.NewConst(constant.Imag(expr.Value), types.Typ[types.Float64]))
+			cplx := llvm.Undef(c.ctx.StructType([]llvm.Type{c.ctx.DoubleType(), c.ctx.DoubleType()}, false))
+			cplx = llvm.ConstInsertValue(cplx, r, []uint32{0})
+			cplx = llvm.ConstInsertValue(cplx, i, []uint32{1})
 			return cplx
 		} else {
 			panic("unknown constant of basic type: " + expr.String())
@@ -2569,35 +2756,35 @@ func (b *builder) createConst(expr *ssa.Const) llvm.Value {
 		if expr.Value != nil {
 			panic("expected nil chan constant")
 		}
-		return llvm.ConstNull(b.getLLVMType(expr.Type()))
+		return llvm.ConstNull(c.getLLVMType(expr.Type()))
 	case *types.Signature:
 		if expr.Value != nil {
 			panic("expected nil signature constant")
 		}
-		return llvm.ConstNull(b.getLLVMType(expr.Type()))
+		return llvm.ConstNull(c.getLLVMType(expr.Type()))
 	case *types.Interface:
 		if expr.Value != nil {
 			panic("expected nil interface constant")
 		}
 		// Create a generic nil interface with no dynamic type (typecode=0).
 		fields := []llvm.Value{
-			llvm.ConstInt(b.uintptrType, 0, false),
-			llvm.ConstPointerNull(b.i8ptrType),
+			llvm.ConstInt(c.uintptrType, 0, false),
+			llvm.ConstPointerNull(c.i8ptrType),
 		}
-		return llvm.ConstNamedStruct(b.getLLVMRuntimeType("_interface"), fields)
+		return llvm.ConstNamedStruct(c.getLLVMRuntimeType("_interface"), fields)
 	case *types.Pointer:
 		if expr.Value != nil {
 			panic("expected nil pointer constant")
 		}
-		return llvm.ConstPointerNull(b.getLLVMType(typ))
+		return llvm.ConstPointerNull(c.getLLVMType(typ))
 	case *types.Slice:
 		if expr.Value != nil {
 			panic("expected nil slice constant")
 		}
-		elemType := b.getLLVMType(typ.Elem())
+		elemType := c.getLLVMType(typ.Elem())
 		llvmPtr := llvm.ConstPointerNull(llvm.PointerType(elemType, 0))
-		llvmLen := llvm.ConstInt(b.uintptrType, 0, false)
-		slice := b.ctx.ConstStruct([]llvm.Value{
+		llvmLen := llvm.ConstInt(c.uintptrType, 0, false)
+		slice := c.ctx.ConstStruct([]llvm.Value{
 			llvmPtr, // backing array
 			llvmLen, // len
 			llvmLen, // cap
@@ -2608,7 +2795,7 @@ func (b *builder) createConst(expr *ssa.Const) llvm.Value {
 			// I believe this is not allowed by the Go spec.
 			panic("non-nil map constant")
 		}
-		llvmType := b.getLLVMType(typ)
+		llvmType := c.getLLVMType(typ)
 		return llvm.ConstNull(llvmType)
 	default:
 		panic("unknown constant: " + expr.String())

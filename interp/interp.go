@@ -50,10 +50,17 @@ func newRunner(mod llvm.Module, debug bool) *runner {
 	return &r
 }
 
+// Dispose deallocates all alloated LLVM resources.
+func (r *runner) dispose() {
+	r.targetData.Dispose()
+	r.targetData = llvm.TargetData{}
+}
+
 // Run evaluates runtime.initAll function as much as possible at compile time.
 // Set debug to true if it should print output while running.
 func Run(mod llvm.Module, debug bool) error {
 	r := newRunner(mod, debug)
+	defer r.dispose()
 
 	initAll := mod.NamedFunction("runtime.initAll")
 	bb := initAll.EntryBasicBlock()
@@ -121,7 +128,10 @@ func Run(mod llvm.Module, debug bool) error {
 				r.builder.CreateCall(fn, []llvm.Value{i8undef}, "")
 				// Make sure that any globals touched by the package
 				// initializer, won't be accessed by later package initializers.
-				r.markExternalLoad(fn)
+				err := r.markExternalLoad(fn)
+				if err != nil {
+					return fmt.Errorf("failed to interpret package %s: %w", r.pkgName, err)
+				}
 				continue
 			}
 			return callErr
@@ -193,6 +203,7 @@ func RunFunc(fn llvm.Value, debug bool) error {
 	// Create and initialize *runner object.
 	mod := fn.GlobalParent()
 	r := newRunner(mod, debug)
+	defer r.dispose()
 	initName := fn.Name()
 	if !strings.HasSuffix(initName, ".init") {
 		return errorAt(fn, "interp: unexpected function name (expected *.init)")
@@ -288,12 +299,16 @@ func (r *runner) getFunction(llvmFn llvm.Value) *function {
 // variable. Another package initializer might read from the same global
 // variable. By marking this function as being run at runtime, that load
 // instruction will need to be run at runtime instead of at compile time.
-func (r *runner) markExternalLoad(llvmValue llvm.Value) {
+func (r *runner) markExternalLoad(llvmValue llvm.Value) error {
 	mem := memoryView{r: r}
-	mem.markExternalLoad(llvmValue)
+	err := mem.markExternalLoad(llvmValue)
+	if err != nil {
+		return err
+	}
 	for index, obj := range mem.objects {
 		if obj.marked > r.objects[index].marked {
 			r.objects[index].marked = obj.marked
 		}
 	}
+	return nil
 }

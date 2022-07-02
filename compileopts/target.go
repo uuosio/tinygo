@@ -12,11 +12,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"github.com/tinygo-org/tinygo/goenv"
-	"tinygo.org/x/go-llvm"
 )
 
 // Target specification for a given target. Used for bare metal targets.
@@ -267,12 +265,8 @@ func defaultTarget(goos, goarch, triple string) (*TargetSpec, error) {
 		spec.Libc = "darwin-libSystem"
 		arch := strings.Split(triple, "-")[0]
 		platformVersion := strings.TrimPrefix(strings.Split(triple, "-")[2], "macosx")
-		flavor := "darwin"
-		if strings.Split(llvm.Version, ".")[0] < "13" {
-			flavor = "darwinnew" // needed on LLVM 12 and below
-		}
 		spec.LDFlags = append(spec.LDFlags,
-			"-flavor", flavor,
+			"-flavor", "darwin",
 			"-dead_strip",
 			"-arch", arch,
 			"-platform_version", "macos", platformVersion, platformVersion,
@@ -297,13 +291,8 @@ func defaultTarget(goos, goarch, triple string) (*TargetSpec, error) {
 			"--image-base", "0x400000",
 			"--gc-sections",
 			"--no-insert-timestamp",
+			"--no-dynamicbase",
 		)
-		llvmMajor, _ := strconv.Atoi(strings.Split(llvm.Version, ".")[0])
-		if llvmMajor >= 12 {
-			// This flag was added in LLVM 12. At the same time, LLVM 12
-			// switched the default from --dynamicbase to --no-dynamicbase.
-			spec.LDFlags = append(spec.LDFlags, "--no-dynamicbase")
-		}
 	} else {
 		spec.LDFlags = append(spec.LDFlags, "-no-pie", "-Wl,--gc-sections") // WARNING: clang < 5.0 requires -nopie
 	}
@@ -314,7 +303,7 @@ func defaultTarget(goos, goarch, triple string) (*TargetSpec, error) {
 			// systems so we need separate assembly files.
 			suffix = "_windows"
 		}
-		spec.ExtraFiles = append(spec.ExtraFiles, "src/runtime/gc_"+goarch+suffix+".S")
+		spec.ExtraFiles = append(spec.ExtraFiles, "src/runtime/asm_"+goarch+suffix+".S")
 		spec.ExtraFiles = append(spec.ExtraFiles, "src/internal/task/task_stack_"+goarch+suffix+".S")
 	}
 	if goarch != runtime.GOARCH {

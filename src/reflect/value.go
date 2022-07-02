@@ -135,16 +135,22 @@ func (v Value) IsNil() bool {
 // Pointer returns the underlying pointer of the given value for the following
 // types: chan, map, pointer, unsafe.Pointer, slice, func.
 func (v Value) Pointer() uintptr {
+	return uintptr(v.UnsafePointer())
+}
+
+// UnsafePointer returns the underlying pointer of the given value for the
+// following types: chan, map, pointer, unsafe.Pointer, slice, func.
+func (v Value) UnsafePointer() unsafe.Pointer {
 	switch v.Kind() {
 	case Chan, Map, Ptr, UnsafePointer:
-		return uintptr(v.pointer())
+		return v.pointer()
 	case Slice:
 		slice := (*sliceHeader)(v.value)
-		return uintptr(slice.data)
+		return slice.data
 	case Func:
-		panic("unimplemented: (reflect.Value).Pointer()")
+		panic("unimplemented: (reflect.Value).UnsafePointer()")
 	default: // not implemented: Func
-		panic(&ValueError{Method: "Pointer"})
+		panic(&ValueError{Method: "UnsafePointer"})
 	}
 }
 
@@ -802,8 +808,7 @@ func (e *ValueError) Error() string {
 	return "reflect: call of " + e.Method + " on " + e.Kind.String() + " Value"
 }
 
-// Calls to this function are converted to LLVM intrinsic calls such as
-// llvm.memcpy.p0i8.p0i8.i32().
+//go:linkname memcpy runtime.memcpy
 func memcpy(dst, src unsafe.Pointer, size uintptr)
 
 //go:linkname alloc runtime.alloc

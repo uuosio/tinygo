@@ -13,6 +13,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
@@ -48,6 +49,7 @@ func TestBuild(t *testing.T) {
 		"calls.go",
 		"cgo/",
 		"channel.go",
+		"embed/",
 		"float.go",
 		"gc.go",
 		"goroutines.go",
@@ -74,6 +76,7 @@ func TestBuild(t *testing.T) {
 		tests = append(tests, "go1.17.go")
 	}
 	if minor >= 18 {
+		tests = append(tests, "generics.go")
 		tests = append(tests, "testing_go118.go")
 	} else {
 		tests = append(tests, "testing.go")
@@ -146,46 +149,7 @@ func TestBuild(t *testing.T) {
 		// LIBCLANG FATAL ERROR: Cannot select: t3: i16 = JumpTable<0>
 		// This bug is non-deterministic.
 		t.Skip("skipped due to non-deterministic backend bugs")
-
-		var avrTests []string
-		for _, t := range tests {
-			switch t {
-			case "atomic.go":
-				// Requires GCC 11.2.0 or above for interface comparison.
-				// https://github.com/gcc-mirror/gcc/commit/f30dd607669212de135dec1f1d8a93b8954c327c
-
-			case "reflect.go":
-				// Reflect tests do not work due to type code issues.
-
-			case "gc.go":
-				// Does not pass due to high mark false positive rate.
-
-			case "json.go", "stdlib.go", "testing.go":
-				// Breaks interp.
-
-			case "map.go":
-				// Reflect size calculation crashes.
-
-			case "binop.go":
-				// Interface comparison results are inverted.
-
-			case "channel.go":
-				// Freezes after recv from closed channel.
-
-			case "float.go", "math.go", "print.go":
-				// Stuck in runtime.printfloat64.
-
-			case "interface.go":
-				// Several comparison tests fail.
-
-			case "cgo/":
-				// CGo does not work on AVR.
-
-			default:
-				avrTests = append(avrTests, t)
-			}
-		}
-		runPlatTests(optionsFromTarget("simavr", sema), avrTests, t)
+		runPlatTests(optionsFromTarget("simavr", sema), tests, t)
 	})
 
 	if runtime.GOOS == "linux" {
@@ -217,6 +181,37 @@ func runPlatTests(options compileopts.Options, tests []string, t *testing.T) {
 	}
 
 	for _, name := range tests {
+		if options.Target == "simavr" {
+			// Not all tests are currently supported on AVR.
+			// Skip the ones that aren't.
+			switch name {
+			case "reflect.go":
+				// Reflect tests do not work due to type code issues.
+				continue
+
+			case "gc.go":
+				// Does not pass due to high mark false positive rate.
+				continue
+
+			case "json.go", "stdlib.go", "testing.go", "testing_go118.go":
+				// Breaks interp.
+				continue
+
+			case "channel.go":
+				// Freezes after recv from closed channel.
+				continue
+
+			case "math.go":
+				// Stuck somewhere, not sure what's happening.
+				continue
+
+			case "cgo/":
+				// CGo does not work on AVR.
+				continue
+
+			default:
+			}
+		}
 		name := name // redefine to avoid race condition
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -247,6 +242,13 @@ func runPlatTests(options compileopts.Options, tests []string, t *testing.T) {
 		t.Run("rand.go", func(t *testing.T) {
 			t.Parallel()
 			runTest("rand.go", options, t, nil, nil)
+		})
+	}
+	if options.Target != "wasi" && options.Target != "wasm" {
+		// The recover() builtin isn't supported yet on WebAssembly and Windows.
+		t.Run("recover.go", func(t *testing.T) {
+			t.Parallel()
+			runTest("recover.go", options, t, nil, nil)
 		})
 	}
 }
@@ -347,6 +349,7 @@ func runTestWithConfig(name string, t *testing.T, options compileopts.Options, c
 		actual = bytes.Replace(actual, []byte{0x1b, '[', '3', '2', 'm'}, nil, -1)
 		actual = bytes.Replace(actual, []byte{0x1b, '[', '0', 'm'}, nil, -1)
 		actual = bytes.Replace(actual, []byte{'.', '.', '\n'}, []byte{'\n'}, -1)
+		actual = bytes.Replace(actual, []byte{'\n', '.', '\n'}, []byte{'\n', '\n'}, -1)
 	}
 	if name == "testing.go" {
 		// Strip actual time.
@@ -525,6 +528,46 @@ func ioLogger(t *testing.T, wg *sync.WaitGroup) io.WriteCloser {
 	}()
 
 	return w
+}
+
+func TestGetListOfPackages(t *testing.T) {
+	opts := optionsFromTarget("", sema)
+	tests := []struct {
+		pkgs          []string
+		expectedPkgs  []string
+		expectesError bool
+	}{
+		{
+			pkgs: []string{"./tests/testing/recurse/..."},
+			expectedPkgs: []string{
+				"github.com/tinygo-org/tinygo/tests/testing/recurse",
+				"github.com/tinygo-org/tinygo/tests/testing/recurse/subdir",
+			},
+		},
+		{
+			pkgs: []string{"./tests/testing/pass"},
+			expectedPkgs: []string{
+				"github.com/tinygo-org/tinygo/tests/testing/pass",
+			},
+		},
+		{
+			pkgs:          []string{"./tests/testing"},
+			expectesError: true,
+		},
+	}
+
+	for _, test := range tests {
+		actualPkgs, err := getListOfPackages(test.pkgs, &opts)
+		if err != nil && !test.expectesError {
+			t.Errorf("unexpected error: %v", err)
+		} else if err == nil && test.expectesError {
+			t.Error("expected error, but got none")
+		}
+
+		if !reflect.DeepEqual(test.expectedPkgs, actualPkgs) {
+			t.Errorf("expected two slices to be equal, expected %v got %v", test.expectedPkgs, actualPkgs)
+		}
+	}
 }
 
 // This TestMain is necessary because TinyGo may also be invoked to run certain

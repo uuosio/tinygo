@@ -11,6 +11,39 @@ import (
 	"tinygo.org/x/go-llvm"
 )
 
+// OptimizePackage runs optimization passes over the LLVM module for the given
+// Go package.
+func OptimizePackage(mod llvm.Module, config *compileopts.Config) {
+	optLevel, sizeLevel, _ := config.OptLevels()
+
+	// Run function passes for each function in the module.
+	// These passes are intended to be run on each function right
+	// after they're created to reduce IR size (and maybe also for
+	// cache locality to improve performance), but for now they're
+	// run here for each function in turn. Maybe this can be
+	// improved in the future.
+	builder := llvm.NewPassManagerBuilder()
+	defer builder.Dispose()
+	builder.SetOptLevel(optLevel)
+	builder.SetSizeLevel(sizeLevel)
+	funcPasses := llvm.NewFunctionPassManagerForModule(mod)
+	defer funcPasses.Dispose()
+	builder.PopulateFunc(funcPasses)
+	funcPasses.InitializeFunc()
+	for fn := mod.FirstFunction(); !fn.IsNil(); fn = llvm.NextFunction(fn) {
+		if fn.IsDeclaration() {
+			continue
+		}
+		funcPasses.RunFunc(fn)
+	}
+	funcPasses.FinalizeFunc()
+
+	// Run TinyGo-specific optimization passes.
+	if optLevel > 0 {
+		OptimizeMaps(mod)
+	}
+}
+
 // Optimize runs a number of optimization and transformation passes over the
 // given module. Some passes are specific to TinyGo, others are generic LLVM
 // passes. You can set a preferred performance (0-3) and size (0-2) level and
@@ -64,7 +97,6 @@ func Optimize(mod llvm.Module, config *compileopts.Config, optLevel, sizeLevel i
 		goPasses.Run(mod)
 
 		// Run TinyGo-specific optimization passes.
-		OptimizeMaps(mod)
 		OptimizeStringToBytes(mod)
 		OptimizeReflectImplements(mod)
 		OptimizeAllocs(mod, nil, nil)
@@ -157,8 +189,7 @@ func Optimize(mod llvm.Module, config *compileopts.Config, optLevel, sizeLevel i
 	builder.Populate(modPasses)
 	modPasses.Run(mod)
 
-	hasGCPass := AddGlobalsBitmap(mod)
-	hasGCPass = MakeGCStackSlots(mod) || hasGCPass
+	hasGCPass := MakeGCStackSlots(mod)
 	if hasGCPass {
 		if err := llvm.VerifyModule(mod, llvm.PrintMessageAction); err != nil {
 			return []error{errors.New("GC pass caused a verification failure")}

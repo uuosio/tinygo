@@ -9,7 +9,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -33,6 +32,7 @@ var defaultTestConfig = &compileopts.Config{
 func testTransform(t *testing.T, pathPrefix string, transform func(mod llvm.Module)) {
 	// Read the input IR.
 	ctx := llvm.NewContext()
+	defer ctx.Dispose()
 	buf, err := llvm.NewMemoryBufferFromFile(pathPrefix + ".ll")
 	os.Stat(pathPrefix + ".ll") // make sure this file is tracked by `go test` caching
 	if err != nil {
@@ -42,6 +42,7 @@ func testTransform(t *testing.T, pathPrefix string, transform func(mod llvm.Modu
 	if err != nil {
 		t.Fatalf("could not load module:\n%v", err)
 	}
+	defer mod.Dispose()
 
 	// Perform the transform.
 	transform(mod)
@@ -101,12 +102,6 @@ func fuzzyEqualIR(s1, s2 string) bool {
 // stripped out.
 func filterIrrelevantIRLines(lines []string) []string {
 	var out []string
-	llvmVersion, err := strconv.Atoi(strings.Split(llvm.Version, ".")[0])
-	if err != nil {
-		// Note: this should never happen and if it does, it will always happen
-		// for a particular build because llvm.Version is a constant.
-		panic(err)
-	}
 	for _, line := range lines {
 		line = strings.Split(line, ";")[0]    // strip out comments/info
 		line = strings.TrimRight(line, "\r ") // drop '\r' on Windows and remove trailing spaces from comments
@@ -114,11 +109,6 @@ func filterIrrelevantIRLines(lines []string) []string {
 			continue
 		}
 		if strings.HasPrefix(line, "source_filename = ") {
-			continue
-		}
-		if llvmVersion < 12 && strings.HasPrefix(line, "attributes ") {
-			// Ignore attribute groups. These may change between LLVM versions.
-			// Right now test outputs are for LLVM 12.
 			continue
 		}
 		out = append(out, line)
@@ -153,9 +143,10 @@ func compileGoFileForTesting(t *testing.T, filename string) llvm.Module {
 	if err != nil {
 		t.Fatal("failed to create target machine:", err)
 	}
+	defer machine.Dispose()
 
 	// Load entire program AST into memory.
-	lprogram, err := loader.Load(config, []string{filename}, config.ClangHeaders, types.Config{
+	lprogram, err := loader.Load(config, filename, config.ClangHeaders, types.Config{
 		Sizes: compiler.Sizes(machine),
 	})
 	if err != nil {

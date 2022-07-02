@@ -4,6 +4,7 @@
 package builder
 
 import (
+	"crypto/sha256"
 	"crypto/sha512"
 	"debug/elf"
 	"encoding/binary"
@@ -80,6 +81,7 @@ type packageAction struct {
 	Config           *compiler.Config
 	CFlags           []string
 	FileHashes       map[string]string // hash of every file that's part of the package
+	EmbeddedFiles    map[string]string // hash of all the //go:embed files in the package
 	Imports          map[string]string // map from imported package to action ID hash
 	OptLevel         int               // LLVM optimization level (0-3)
 	SizeLevel        int               // LLVM optimization for size level (0-2)
@@ -207,9 +209,10 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	if err != nil {
 		return err
 	}
+	defer machine.Dispose()
 
 	// Load entire program AST into memory.
-	lprogram, err := loader.Load(config, []string{pkgName}, config.ClangHeaders, types.Config{
+	lprogram, err := loader.Load(config, pkgName, config.ClangHeaders, types.Config{
 		Sizes: compiler.Sizes(machine),
 	})
 	if err != nil {
@@ -227,8 +230,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	// Add jobs to compile each package.
 	// Packages that have a cache hit will not be compiled again.
 	var packageJobs []*compileJob
-	packageBitcodePaths := make(map[string]string)
-	packageActionIDs := make(map[string]string)
+	packageActionIDJobs := make(map[string]*compileJob)
 
 	if config.Options.GlobalValues["runtime"]["buildVersion"] == "" {
 		version := goenv.Version
@@ -244,6 +246,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 		config.Options.GlobalValues["runtime"]["buildVersion"] = version
 	}
 
+	var embedFileObjects []*compileJob
 	for _, pkg := range lprogram.Sorted() {
 		pkg := pkg // necessary to avoid a race condition
 
@@ -253,52 +256,114 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 		}
 		sort.Strings(undefinedGlobals)
 
-		// Create a cache key: a hash from the action ID below that contains all
-		// the parameters for the build.
-		actionID := packageAction{
-			ImportPath:       pkg.ImportPath,
-			CompilerBuildID:  string(compilerBuildID),
-			TinyGoVersion:    goenv.Version,
-			LLVMVersion:      llvm.Version,
-			Config:           compilerConfig,
-			CFlags:           pkg.CFlags,
-			FileHashes:       make(map[string]string, len(pkg.FileHashes)),
-			Imports:          make(map[string]string, len(pkg.Pkg.Imports())),
-			OptLevel:         optLevel,
-			SizeLevel:        sizeLevel,
-			UndefinedGlobals: undefinedGlobals,
+		// Make compile jobs to load files to be embedded in the output binary.
+		var actionIDDependencies []*compileJob
+		allFiles := map[string][]*loader.EmbedFile{}
+		for _, files := range pkg.EmbedGlobals {
+			for _, file := range files {
+				allFiles[file.Name] = append(allFiles[file.Name], file)
+			}
 		}
-		for filePath, hash := range pkg.FileHashes {
-			actionID.FileHashes[filePath] = hex.EncodeToString(hash)
+		for name, files := range allFiles {
+			name := name
+			files := files
+			job := &compileJob{
+				description: "make object file for " + name,
+				run: func(job *compileJob) error {
+					// Read the file contents in memory.
+					path := filepath.Join(pkg.Dir, name)
+					data, err := os.ReadFile(path)
+					if err != nil {
+						return err
+					}
+
+					// Hash the file.
+					sum := sha256.Sum256(data)
+					hexSum := hex.EncodeToString(sum[:16])
+
+					for _, file := range files {
+						file.Size = uint64(len(data))
+						file.Hash = hexSum
+						if file.NeedsData {
+							file.Data = data
+						}
+					}
+
+					job.result, err = createEmbedObjectFile(string(data), hexSum, name, pkg.OriginalDir(), dir, compilerConfig)
+					return err
+				},
+			}
+			actionIDDependencies = append(actionIDDependencies, job)
+			embedFileObjects = append(embedFileObjects, job)
 		}
+
+		// Action ID jobs need to know the action ID of all the jobs the package
+		// imports.
+		var importedPackages []*compileJob
 		for _, imported := range pkg.Pkg.Imports() {
-			hash, ok := packageActionIDs[imported.Path()]
+			job, ok := packageActionIDJobs[imported.Path()]
 			if !ok {
 				return fmt.Errorf("package %s imports %s but couldn't find dependency", pkg.ImportPath, imported.Path())
 			}
-			actionID.Imports[imported.Path()] = hash
+			importedPackages = append(importedPackages, job)
+			actionIDDependencies = append(actionIDDependencies, job)
 		}
-		buf, err := json.Marshal(actionID)
-		if err != nil {
-			panic(err) // shouldn't happen
+
+		// Create a job that will calculate the action ID for a package compile
+		// job. The action ID is the cache key that is used for caching this
+		// package.
+		packageActionIDJob := &compileJob{
+			description:  "calculate cache key for package " + pkg.ImportPath,
+			dependencies: actionIDDependencies,
+			run: func(job *compileJob) error {
+				// Create a cache key: a hash from the action ID below that contains all
+				// the parameters for the build.
+				actionID := packageAction{
+					ImportPath:       pkg.ImportPath,
+					CompilerBuildID:  string(compilerBuildID),
+					TinyGoVersion:    goenv.Version,
+					LLVMVersion:      llvm.Version,
+					Config:           compilerConfig,
+					CFlags:           pkg.CFlags,
+					FileHashes:       make(map[string]string, len(pkg.FileHashes)),
+					EmbeddedFiles:    make(map[string]string, len(allFiles)),
+					Imports:          make(map[string]string, len(pkg.Pkg.Imports())),
+					OptLevel:         optLevel,
+					SizeLevel:        sizeLevel,
+					UndefinedGlobals: undefinedGlobals,
+				}
+				for filePath, hash := range pkg.FileHashes {
+					actionID.FileHashes[filePath] = hex.EncodeToString(hash)
+				}
+				for name, files := range allFiles {
+					actionID.EmbeddedFiles[name] = files[0].Hash
+				}
+				for i, imported := range pkg.Pkg.Imports() {
+					actionID.Imports[imported.Path()] = importedPackages[i].result
+				}
+				buf, err := json.Marshal(actionID)
+				if err != nil {
+					return err // shouldn't happen
+				}
+				hash := sha512.Sum512_224(buf)
+				job.result = hex.EncodeToString(hash[:])
+				return nil
+			},
 		}
-		hash := sha512.Sum512_224(buf)
-		packageActionIDs[pkg.ImportPath] = hex.EncodeToString(hash[:])
+		packageActionIDJobs[pkg.ImportPath] = packageActionIDJob
 
-		// Determine the path of the bitcode file (which is a serialized version
-		// of a LLVM module).
-		bitcodePath := filepath.Join(cacheDir, "pkg-"+hex.EncodeToString(hash[:])+".bc")
-		packageBitcodePaths[pkg.ImportPath] = bitcodePath
-
-		// The package has not yet been compiled, so create a job to do so.
+		// Now create the job to actually build the package. It will exit early
+		// if the package is already compiled.
 		job := &compileJob{
-			description: "compile package " + pkg.ImportPath,
-			run: func(*compileJob) error {
+			description:  "compile package " + pkg.ImportPath,
+			dependencies: []*compileJob{packageActionIDJob},
+			run: func(job *compileJob) error {
+				job.result = filepath.Join(cacheDir, "pkg-"+packageActionIDJob.result+".bc")
 				// Acquire a lock (if supported).
-				unlock := lock(bitcodePath + ".lock")
+				unlock := lock(job.result + ".lock")
 				defer unlock()
 
-				if _, err := os.Stat(bitcodePath); err == nil {
+				if _, err := os.Stat(job.result); err == nil {
 					// Already cached, don't recreate this package.
 					return nil
 				}
@@ -306,6 +371,8 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 				// Compile AST to IR. The compiler.CompilePackage function will
 				// build the SSA as needed.
 				mod, errs := compiler.CompilePackage(pkg.ImportPath, pkg, program.Package(pkg.Pkg), machine, compilerConfig, config.DumpSSA())
+				defer mod.Context().Dispose()
+				defer mod.Dispose()
 				if errs != nil {
 					return newMultiError(errs)
 				}
@@ -391,33 +458,13 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 					return errors.New("verification error after interpreting " + pkgInit.Name())
 				}
 
-				// Run function passes for each function in the module.
-				// These passes are intended to be run on each function right
-				// after they're created to reduce IR size (and maybe also for
-				// cache locality to improve performance), but for now they're
-				// run here for each function in turn. Maybe this can be
-				// improved in the future.
-				builder := llvm.NewPassManagerBuilder()
-				defer builder.Dispose()
-				builder.SetOptLevel(optLevel)
-				builder.SetSizeLevel(sizeLevel)
-				funcPasses := llvm.NewFunctionPassManagerForModule(mod)
-				defer funcPasses.Dispose()
-				builder.PopulateFunc(funcPasses)
-				funcPasses.InitializeFunc()
-				for fn := mod.FirstFunction(); !fn.IsNil(); fn = llvm.NextFunction(fn) {
-					if fn.IsDeclaration() {
-						continue
-					}
-					funcPasses.RunFunc(fn)
-				}
-				funcPasses.FinalizeFunc()
+				transform.OptimizePackage(mod, config)
 
 				// Serialize the LLVM module as a bitcode file.
 				// Write to a temporary path that is renamed to the destination
 				// file to avoid race conditions with other TinyGo invocatiosn
 				// that might also be compiling this package at the same time.
-				f, err := ioutil.TempFile(filepath.Dir(bitcodePath), filepath.Base(bitcodePath))
+				f, err := ioutil.TempFile(filepath.Dir(job.result), filepath.Base(job.result))
 				if err != nil {
 					return err
 				}
@@ -437,13 +484,13 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 				if err != nil {
 					// WriteBitcodeToFile doesn't produce a useful error on its
 					// own, so create a somewhat useful error message here.
-					return fmt.Errorf("failed to write bitcode for package %s to file %s", pkg.ImportPath, bitcodePath)
+					return fmt.Errorf("failed to write bitcode for package %s to file %s", pkg.ImportPath, job.result)
 				}
 				err = f.Close()
 				if err != nil {
 					return err
 				}
-				return os.Rename(f.Name(), bitcodePath)
+				return os.Rename(f.Name(), job.result)
 			},
 		}
 		packageJobs = append(packageJobs, job)
@@ -451,6 +498,13 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 
 	// Add job that links and optimizes all packages together.
 	var mod llvm.Module
+	defer func() {
+		if !mod.IsNil() {
+			ctx := mod.Context()
+			mod.Dispose()
+			ctx.Dispose()
+		}
+	}()
 	var stackSizeLoads []string
 	programJob := &compileJob{
 		description:  "link+optimize packages (LTO)",
@@ -460,8 +514,8 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 			// anything, it only links the bitcode files together.
 			ctx := llvm.NewContext()
 			mod = ctx.NewModule("main")
-			for _, pkg := range lprogram.Sorted() {
-				pkgMod, err := ctx.ParseBitcodeFile(packageBitcodePaths[pkg.ImportPath])
+			for _, pkgJob := range packageJobs {
+				pkgMod, err := ctx.ParseBitcodeFile(pkgJob.result)
 				if err != nil {
 					return fmt.Errorf("failed to load bitcode file: %w", err)
 				}
@@ -553,6 +607,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 			if err != nil {
 				return err
 			}
+			defer llvmBuf.Dispose()
 			return ioutil.WriteFile(outpath, llvmBuf.Bytes(), 0666)
 		case ".bc":
 			var buf llvm.MemoryBuffer
@@ -676,6 +731,9 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	// Add libc dependencies, if they exist.
 	linkerDependencies = append(linkerDependencies, libcDependencies...)
 
+	// Add embedded files.
+	linkerDependencies = append(linkerDependencies, embedFileObjects...)
+
 	// Strip debug information with -no-debug.
 	if !config.Debug() {
 		for _, tag := range config.BuildTags() {
@@ -684,6 +742,12 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 				// the debug information isn't flashed to the device anyway.
 				return fmt.Errorf("stripping debug information is unnecessary for baremetal targets")
 			}
+		}
+		if config.GOOS() == "darwin" {
+			// Debug information isn't stored in the binary itself on MacOS but
+			// is left in the object files by default. The binary does store the
+			// path to these object files though.
+			return errors.New("cannot remove debug information: MacOS doesn't store debug info in the executable by default")
 		}
 		if config.Target.Linker == "wasm-ld" {
 			// Don't just strip debug information, also compress relocations
@@ -694,21 +758,8 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 			// ld.lld is also used on Linux.
 			ldflags = append(ldflags, "--strip-debug")
 		} else {
-			switch config.GOOS() {
-			case "linux":
-				// Either real linux or an embedded system (like AVR) that
-				// pretends to be Linux. It's a ELF linker wrapped by GCC in any
-				// case (not ld.lld - that case is handled above).
-				ldflags = append(ldflags, "-Wl,--strip-debug")
-			case "darwin":
-				// MacOS (darwin) doesn't have a linker flag to strip debug
-				// information. Apple expects you to use the strip command
-				// instead.
-				return errors.New("cannot remove debug information: MacOS doesn't suppor this linker flag")
-			default:
-				// Other OSes may have different flags.
-				return errors.New("cannot remove debug information: unknown OS: " + config.GOOS())
-			}
+			// Other linkers may have different flags.
+			return errors.New("cannot remove debug information: unknown linker: " + config.Target.Linker)
 		}
 	}
 
@@ -728,11 +779,24 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 				config.Options.PrintCommands(config.Target.Linker, ldflags...)
 			}
 			if config.UseThinLTO() {
-				ldflags = append(ldflags,
-					"--thinlto-cache-dir="+filepath.Join(cacheDir, "thinlto"),
-					"-plugin-opt=mcpu="+config.CPU(),
-					"-plugin-opt=O"+strconv.Itoa(optLevel),
-					"-plugin-opt=thinlto")
+				ldflags = append(ldflags, "-mllvm", "-mcpu="+config.CPU())
+				if config.GOOS() == "windows" {
+					// Options for the MinGW wrapper for the lld COFF linker.
+					ldflags = append(ldflags,
+						"-Xlink=/opt:lldlto="+strconv.Itoa(optLevel),
+						"--thinlto-cache-dir="+filepath.Join(cacheDir, "thinlto"))
+				} else if config.GOOS() == "darwin" {
+					// Options for the ld64-compatible lld linker.
+					ldflags = append(ldflags,
+						"--lto-O"+strconv.Itoa(optLevel),
+						"-cache_path_lto", filepath.Join(cacheDir, "thinlto"))
+				} else {
+					// Options for the ELF linker.
+					ldflags = append(ldflags,
+						"--lto-O"+strconv.Itoa(optLevel),
+						"--thinlto-cache-dir="+filepath.Join(cacheDir, "thinlto"),
+					)
+				}
 				if config.CodeModel() != "default" {
 					ldflags = append(ldflags,
 						"-mllvm", "-code-model="+config.CodeModel())
@@ -915,6 +979,112 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	})
 }
 
+// createEmbedObjectFile creates a new object file with the given contents, for
+// the embed package.
+func createEmbedObjectFile(data, hexSum, sourceFile, sourceDir, tmpdir string, compilerConfig *compiler.Config) (string, error) {
+	// TODO: this works for small files, but can be a problem for larger files.
+	// For larger files, it seems more appropriate to generate the object file
+	// manually without going through LLVM.
+	// On the other hand, generating DWARF like we do here can be difficult
+	// without assistance from LLVM.
+
+	// Create new LLVM module just for this file.
+	ctx := llvm.NewContext()
+	defer ctx.Dispose()
+	mod := ctx.NewModule("data")
+	defer mod.Dispose()
+
+	// Create data global.
+	value := ctx.ConstString(data, false)
+	globalName := "embed/file_" + hexSum
+	global := llvm.AddGlobal(mod, value.Type(), globalName)
+	global.SetInitializer(value)
+	global.SetLinkage(llvm.LinkOnceODRLinkage)
+	global.SetGlobalConstant(true)
+	global.SetUnnamedAddr(true)
+	global.SetAlignment(1)
+	if compilerConfig.GOOS != "darwin" {
+		// MachO doesn't support COMDATs, while COFF requires it (to avoid
+		// "duplicate symbol" errors). ELF works either way.
+		// Therefore, only use a COMDAT on non-MachO systems (aka non-MacOS).
+		global.SetComdat(mod.Comdat(globalName))
+	}
+
+	// Add DWARF debug information to this global, so that it is
+	// correctly counted when compiling with the -size= flag.
+	dibuilder := llvm.NewDIBuilder(mod)
+	dibuilder.CreateCompileUnit(llvm.DICompileUnit{
+		Language:  0xb, // DW_LANG_C99 (0xc, off-by-one?)
+		File:      sourceFile,
+		Dir:       sourceDir,
+		Producer:  "TinyGo",
+		Optimized: false,
+	})
+	ditype := dibuilder.CreateArrayType(llvm.DIArrayType{
+		SizeInBits:  uint64(len(data)) * 8,
+		AlignInBits: 8,
+		ElementType: dibuilder.CreateBasicType(llvm.DIBasicType{
+			Name:       "byte",
+			SizeInBits: 8,
+			Encoding:   llvm.DW_ATE_unsigned_char,
+		}),
+		Subscripts: []llvm.DISubrange{
+			{
+				Lo:    0,
+				Count: int64(len(data)),
+			},
+		},
+	})
+	difile := dibuilder.CreateFile(sourceFile, sourceDir)
+	diglobalexpr := dibuilder.CreateGlobalVariableExpression(difile, llvm.DIGlobalVariableExpression{
+		Name:        globalName,
+		File:        difile,
+		Line:        1,
+		Type:        ditype,
+		Expr:        dibuilder.CreateExpression(nil),
+		AlignInBits: 8,
+	})
+	global.AddMetadata(0, diglobalexpr)
+	mod.AddNamedMetadataOperand("llvm.module.flags",
+		ctx.MDNode([]llvm.Metadata{
+			llvm.ConstInt(ctx.Int32Type(), 2, false).ConstantAsMetadata(), // Warning on mismatch
+			ctx.MDString("Debug Info Version"),
+			llvm.ConstInt(ctx.Int32Type(), 3, false).ConstantAsMetadata(),
+		}),
+	)
+	mod.AddNamedMetadataOperand("llvm.module.flags",
+		ctx.MDNode([]llvm.Metadata{
+			llvm.ConstInt(ctx.Int32Type(), 7, false).ConstantAsMetadata(), // Max on mismatch
+			ctx.MDString("Dwarf Version"),
+			llvm.ConstInt(ctx.Int32Type(), 4, false).ConstantAsMetadata(),
+		}),
+	)
+	dibuilder.Finalize()
+	dibuilder.Destroy()
+
+	// Write this LLVM module out as an object file.
+	machine, err := compiler.NewTargetMachine(compilerConfig)
+	if err != nil {
+		return "", err
+	}
+	defer machine.Dispose()
+	outfile, err := os.CreateTemp(tmpdir, "embed-"+hexSum+"-*.o")
+	if err != nil {
+		return "", err
+	}
+	defer outfile.Close()
+	buf, err := machine.EmitToMemoryBuffer(mod, llvm.ObjectFile)
+	if err != nil {
+		return "", err
+	}
+	defer buf.Dispose()
+	_, err = outfile.Write(buf.Bytes())
+	if err != nil {
+		return "", err
+	}
+	return outfile.Name(), outfile.Close()
+}
+
 // optimizeProgram runs a series of optimizations and transformations that are
 // needed to convert a program to its final form. Some transformations are not
 // optional and must be run as the compiler expects them to run.
@@ -967,17 +1137,6 @@ func optimizeProgram(mod llvm.Module, config *compileopts.Config) error {
 	}
 	if err := llvm.VerifyModule(mod, llvm.PrintMessageAction); err != nil {
 		return errors.New("verification failure after LLVM optimization passes")
-	}
-
-	// LLVM 11 by default tries to emit tail calls (even with the target feature
-	// disabled) unless it is explicitly disabled with a function attribute.
-	// This is a problem, as it tries to emit them and prints an error when it
-	// can't with this feature disabled.
-	// Because as of september 2020 tail calls are not yet widely supported,
-	// they need to be disabled until they are widely supported (at which point
-	// the +tail-call target feautre can be set).
-	if strings.HasPrefix(config.Triple(), "wasm") {
-		transform.DisableTailCalls(mod)
 	}
 
 	return nil

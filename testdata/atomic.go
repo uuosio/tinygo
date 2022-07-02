@@ -3,6 +3,8 @@ package main
 import (
 	"sync/atomic"
 	"unsafe"
+
+	"runtime/volatile"
 )
 
 func main() {
@@ -81,6 +83,9 @@ func main() {
 	// test atomic.Value load/store operations
 	testValue(int(3), int(-2))
 	testValue("", "foobar", "baz")
+
+	// Test atomic and volatile operations as deferred values.
+	testDefer()
 }
 
 func testValue(values ...interface{}) {
@@ -92,4 +97,15 @@ func testValue(values ...interface{}) {
 			println("val store/load didn't work, expected", val, "but got", loadedVal)
 		}
 	}
+}
+
+func testDefer() {
+	n1 := int32(5)
+	n2 := uint32(6)
+	defer func() {
+		println("deferred atomic add:", n1)
+		println("deferred volatile store:", n2)
+	}()
+	defer atomic.AddInt32(&n1, 3)
+	defer volatile.StoreUint32(&n2, 22)
 }

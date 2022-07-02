@@ -28,17 +28,10 @@ type testCase struct {
 func TestCompiler(t *testing.T) {
 	t.Parallel()
 
-	// Check LLVM version.
+	// Determine LLVM version.
 	llvmMajor, err := strconv.Atoi(strings.SplitN(llvm.Version, ".", 2)[0])
 	if err != nil {
 		t.Fatal("could not parse LLVM version:", llvm.Version)
-	}
-	if llvmMajor < 11 {
-		// It is likely this version needs to be bumped in the future.
-		// The goal is to at least test the LLVM version that's used by default
-		// in TinyGo and (if possible without too many workarounds) also some
-		// previous versions.
-		t.Skip("compiler tests require LLVM 11 or above, got LLVM ", llvm.Version)
 	}
 
 	// Determine Go minor version (e.g. 16 in go1.16.3).
@@ -56,6 +49,7 @@ func TestCompiler(t *testing.T) {
 		{"float.go", "", ""},
 		{"interface.go", "", ""},
 		{"func.go", "", ""},
+		{"defer.go", "cortex-m-qemu", ""},
 		{"pragma.go", "", ""},
 		{"goroutine.go", "wasm", "asyncify"},
 		{"goroutine.go", "cortex-m-qemu", "tasks"},
@@ -100,6 +94,7 @@ func TestCompiler(t *testing.T) {
 			}
 			compilerConfig := &Config{
 				Triple:             config.Triple(),
+				Features:           config.Features(),
 				GOOS:               config.GOOS(),
 				GOARCH:             config.GOARCH(),
 				CodeModel:          config.CodeModel(),
@@ -113,9 +108,10 @@ func TestCompiler(t *testing.T) {
 			if err != nil {
 				t.Fatal("failed to create target machine:", err)
 			}
+			defer machine.Dispose()
 
 			// Load entire program AST into memory.
-			lprogram, err := loader.Load(config, []string{"./testdata/" + tc.file}, config.ClangHeaders, types.Config{
+			lprogram, err := loader.Load(config, "./testdata/"+tc.file, config.ClangHeaders, types.Config{
 				Sizes: Sizes(machine),
 			})
 			if err != nil {
@@ -219,11 +215,6 @@ func filterIrrelevantIRLines(lines []string) []string {
 			continue
 		}
 		if strings.HasPrefix(line, "source_filename = ") {
-			continue
-		}
-		if llvmVersion < 12 && strings.HasPrefix(line, "attributes ") {
-			// Ignore attribute groups. These may change between LLVM versions.
-			// Right now test outputs are for LLVM 12 and higher.
 			continue
 		}
 		if llvmVersion < 14 && strings.HasPrefix(line, "target datalayout = ") {

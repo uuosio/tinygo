@@ -20,6 +20,10 @@ type Task struct {
 
 	// state is the underlying running state of the task.
 	state state
+
+	// DeferFrame stores a pointer to the (stack allocated) defer frame of the
+	// goroutine that is used for the recover builtin.
+	DeferFrame unsafe.Pointer
 }
 
 // getGoroutineStackSize is a compiler intrinsic that returns the stack size for

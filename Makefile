@@ -38,10 +38,16 @@ MD5SUM = md5sum
 # tinygo binary for tests
 TINYGO ?= $(call detect,tinygo,tinygo $(CURDIR)/build/tinygo)
 
-# Use CCACHE for LLVM if possible
-ifneq (, $(shell command -v ccache 2> /dev/null))
-    LLVM_OPTION += '-DLLVM_CCACHE_BUILD=ON'
+# Check for ccache if the user hasn't set it to on or off.
+ifeq (, $(CCACHE))
+    # Use CCACHE for LLVM if possible
+    ifneq (, $(shell command -v ccache 2> /dev/null))
+        CCACHE := ON
+    else
+        CCACHE := OFF
+    endif
 endif
+LLVM_OPTION += '-DLLVM_CCACHE_BUILD=$(CCACHE)'
 
 # Allow enabling LLVM assertions
 ifeq (1, $(ASSERT))
@@ -67,6 +73,15 @@ ifneq ($(CROSS),)
             -DCMAKE_SYSTEM_NAME=Linux \
             -DLLVM_TARGET_ARCH=ARM
         GOENVFLAGS = GOARCH=arm CC=$(CC) CXX=$(CXX) CGO_ENABLED=1
+        BINARYEN_OPTION += -DCMAKE_C_COMPILER=$(CC) -DCMAKE_CXX_COMPILER=$(CXX)
+    else ifeq ($(CROSS), aarch64-linux-gnu)
+        # Assume we're building on a Debian-like distro, with QEMU installed.
+        LLVM_CONFIG_PREFIX = qemu-aarch64 -L /usr/aarch64-linux-gnu/
+        # The CMAKE_SYSTEM_NAME flag triggers cross compilation mode.
+        LLVM_OPTION += \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DLLVM_TARGET_ARCH=AArch64
+        GOENVFLAGS = GOARCH=arm64 CC=$(CC) CXX=$(CXX) CGO_ENABLED=1
         BINARYEN_OPTION += -DCMAKE_C_COMPILER=$(CC) -DCMAKE_CXX_COMPILER=$(CXX)
     else
         $(error Unknown cross compilation target: $(CROSS))
@@ -142,7 +157,7 @@ endif
 clean:
 	@rm -rf build
 
-FMT_PATHS = ./*.go builder cgo compiler interp loader src/device/arm src/examples src/machine src/os src/reflect src/runtime src/sync src/syscall src/testing src/internal/reflectlite transform
+FMT_PATHS = ./*.go builder cgo/*.go compiler interp loader src transform
 fmt:
 	@gofmt -l -w $(FMT_PATHS)
 fmt-check:
@@ -205,7 +220,7 @@ llvm-source: $(LLVM_PROJECTDIR)/llvm
 # Configure LLVM.
 TINYGO_SOURCE_DIR=$(shell pwd)
 $(LLVM_BUILDDIR)/build.ninja: llvm-source
-	mkdir -p $(LLVM_BUILDDIR) && cd $(LLVM_BUILDDIR) && cmake -G Ninja $(TINYGO_SOURCE_DIR)/$(LLVM_PROJECTDIR)/llvm -DEOSIO_TOOL_DIR="$(TINYGO_SOURCE_DIR)/lib/eosio/tools" "-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64;RISCV;WebAssembly" "-DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=AVR;Xtensa" -DCMAKE_BUILD_TYPE=Release -DLIBCLANG_BUILD_STATIC=ON -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_LIBEDIT=OFF -DLLVM_ENABLE_Z3_SOLVER=OFF -DLLVM_ENABLE_OCAMLDOC=OFF -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_TOOL_CLANG_TOOLS_EXTRA_BUILD=OFF -DCLANG_ENABLE_STATIC_ANALYZER=OFF -DCLANG_ENABLE_ARCMT=OFF $(LLVM_OPTION)
+	mkdir -p $(LLVM_BUILDDIR) && cd $(LLVM_BUILDDIR) && cmake -G Ninja $(TINYGO_SOURCE_DIR)/$(LLVM_PROJECTDIR)/llvm "-DLLVM_TARGETS_TO_BUILD=X86;ARM;AArch64;RISCV;WebAssembly" "-DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=AVR;Xtensa" -DCMAKE_BUILD_TYPE=Release -DLIBCLANG_BUILD_STATIC=ON -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_LIBEDIT=OFF -DLLVM_ENABLE_Z3_SOLVER=OFF -DLLVM_ENABLE_OCAMLDOC=OFF -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_TOOL_CLANG_TOOLS_EXTRA_BUILD=OFF -DCLANG_ENABLE_STATIC_ANALYZER=OFF -DCLANG_ENABLE_ARCMT=OFF $(LLVM_OPTION) -DEOSIO_TOOL_DIR="$(TINYGO_SOURCE_DIR)/lib/eosio/tools"
 
 # Build LLVM.
 $(LLVM_BUILDDIR): $(LLVM_BUILDDIR)/build.ninja
@@ -226,7 +241,7 @@ endif
 wasi-libc: lib/wasi-libc/sysroot/lib/wasm32-wasi/libc.a
 lib/wasi-libc/sysroot/lib/wasm32-wasi/libc.a:
 	@if [ ! -e lib/wasi-libc/Makefile ]; then echo "Submodules have not been downloaded. Please download them using:\n  git submodule update --init"; exit 1; fi
-	cd lib/wasi-libc && make -j4 WASM_CFLAGS="-O2 -g -DNDEBUG" MALLOC_IMPL=none WASM_CC=$(CLANG) WASM_AR=$(LLVM_AR) WASM_NM=$(LLVM_NM)
+	cd lib/wasi-libc && make -j4 WASM_CFLAGS="-O2 -g -DNDEBUG -mnontrapping-fptoint -msign-ext" MALLOC_IMPL=none CC=$(CLANG) AR=$(LLVM_AR) NM=$(LLVM_NM)
 
 .PHONY: wasi-libc-eosio
 wasi-libc-eosio: lib/wasi-libc-eosio/sysroot/lib/wasm32-wasi/libc.a
@@ -277,6 +292,7 @@ TEST_PACKAGES_FAST = \
 	crypto/sha256 \
 	crypto/sha512 \
 	debug/macho \
+	embed/internal/embedtest \
 	encoding \
 	encoding/ascii85 \
 	encoding/base32 \
@@ -318,10 +334,14 @@ TEST_PACKAGES_LINUX := \
 	archive/zip \
 	compress/flate \
 	compress/lzw \
+	crypto/hmac \
 	debug/dwarf \
 	debug/plan9obj \
 	io/fs \
-	testing/fstest
+	io/ioutil \
+	strconv \
+	testing/fstest \
+	text/template/parse
 
 TEST_PACKAGES_DARWIN := $(TEST_PACKAGES_LINUX)
 
@@ -387,6 +407,8 @@ tinygo-baremetal:
 .PHONY: smoketest
 smoketest:
 	$(TINYGO) version
+	# regression test for #2892
+	cd tests/testing/recurse && ($(TINYGO) test ./... > recurse.log && cat recurse.log && test $$(wc -l < recurse.log) = 2 && rm recurse.log)
 	# compile-only platform-independent examples
 	cd tests/text/template/smoke && $(TINYGO) test -c && rm -f smoke.test
 	# regression test for #2563
@@ -406,6 +428,8 @@ smoketest:
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=pca10040            examples/echo
 	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=pca10040            examples/echo2
+	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=circuitplay-express examples/i2s
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=pca10040            examples/mcp3008
@@ -421,6 +445,10 @@ smoketest:
 	$(TINYGO) build -size short -o test.hex -target=pca10040            examples/systick
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=pca10040            examples/test
+	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=wioterminal         examples/hid-mouse
+	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=wioterminal         examples/hid-keyboard
 	@$(MD5SUM) test.hex
 	# test simulated boards on play.tinygo.org
 ifneq ($(WASM), 0)
@@ -556,12 +584,21 @@ endif
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=macropad-rp2040 	examples/blinky1
 	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=badger2040          examples/blinky1
+	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=thingplus-rp2040    examples/blinky1
+	@$(MD5SUM) test.hex
 	# test pwm
 	$(TINYGO) build -size short -o test.hex -target=itsybitsy-m0        examples/pwm
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=itsybitsy-m4        examples/pwm
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=feather-m4          examples/pwm
+	@$(MD5SUM) test.hex
+	# test usbhid
+	$(TINYGO) build -size short -o test.hex -target=feather-nrf52840    examples/hid-keyboard
+	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=circuitplay-express examples/hid-keyboard
 	@$(MD5SUM) test.hex
 ifneq ($(STM32), 0)
 	$(TINYGO) build -size short -o test.hex -target=bluepill            examples/blinky1
@@ -654,7 +691,8 @@ endif
 	@$(MD5SUM) test.hex
 	GOOS=linux GOARCH=arm $(TINYGO) build -size short -o test.elf       ./testdata/cgo
 	GOOS=windows GOARCH=amd64 $(TINYGO) build -size short -o test.exe   ./testdata/cgo
-	GOOS=darwin GOARCH=amd64 $(TINYGO) build              -o test       ./testdata/cgo
+	GOOS=darwin GOARCH=amd64 $(TINYGO) build  -size short -o test       ./testdata/cgo
+	GOOS=darwin GOARCH=arm64 $(TINYGO) build  -size short -o test       ./testdata/cgo
 ifneq ($(OS),Windows_NT)
 	# TODO: this does not yet work on Windows. Somehow, unused functions are
 	# not garbage collected.
@@ -740,12 +778,12 @@ endif
 	@cp -rp llvm-project/compiler-rt/LICENSE.TXT  build/release/tinygo/lib/compiler-rt-builtins
 	@cp -rp src                          build/release/tinygo/src
 	@cp -rp targets                      build/release/tinygo/targets
-	./build/tinygo build-library -target=cortex-m0     -o build/release/tinygo/pkg/thumbv6m-unknown-unknown-eabi-cortex-m0/compiler-rt     compiler-rt
-	./build/tinygo build-library -target=cortex-m0plus -o build/release/tinygo/pkg/thumbv6m-unknown-unknown-eabi-cortex-m0plus/compiler-rt compiler-rt
-	./build/tinygo build-library -target=cortex-m4     -o build/release/tinygo/pkg/thumbv7em-unknown-unknown-eabi-cortex-m4/compiler-rt    compiler-rt
-	./build/tinygo build-library -target=cortex-m0     -o build/release/tinygo/pkg/thumbv6m-unknown-unknown-eabi-cortex-m0/picolibc     picolibc
-	./build/tinygo build-library -target=cortex-m0plus -o build/release/tinygo/pkg/thumbv6m-unknown-unknown-eabi-cortex-m0plus/picolibc picolibc
-	./build/tinygo build-library -target=cortex-m4     -o build/release/tinygo/pkg/thumbv7em-unknown-unknown-eabi-cortex-m4/picolibc    picolibc
+	./build/release/tinygo/bin/tinygo build-library -target=cortex-m0     -o build/release/tinygo/pkg/thumbv6m-unknown-unknown-eabi-cortex-m0/compiler-rt     compiler-rt
+	./build/release/tinygo/bin/tinygo build-library -target=cortex-m0plus -o build/release/tinygo/pkg/thumbv6m-unknown-unknown-eabi-cortex-m0plus/compiler-rt compiler-rt
+	./build/release/tinygo/bin/tinygo build-library -target=cortex-m4     -o build/release/tinygo/pkg/thumbv7em-unknown-unknown-eabi-cortex-m4/compiler-rt    compiler-rt
+	./build/release/tinygo/bin/tinygo build-library -target=cortex-m0     -o build/release/tinygo/pkg/thumbv6m-unknown-unknown-eabi-cortex-m0/picolibc     picolibc
+	./build/release/tinygo/bin/tinygo build-library -target=cortex-m0plus -o build/release/tinygo/pkg/thumbv6m-unknown-unknown-eabi-cortex-m0plus/picolibc picolibc
+	./build/release/tinygo/bin/tinygo build-library -target=cortex-m4     -o build/release/tinygo/pkg/thumbv7em-unknown-unknown-eabi-cortex-m4/picolibc    picolibc
 
 release:
 	tar -czf build/release.tar.gz -C build/release tinygo

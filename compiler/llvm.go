@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"go/types"
 	"math/big"
+	"strings"
 
 	"github.com/tinygo-org/tinygo/compiler/llvmutil"
 	"tinygo.org/x/go-llvm"
@@ -21,6 +22,23 @@ import (
 // end the lifetime using emitLifetimeEnd after you're done with it.
 func (b *builder) createTemporaryAlloca(t llvm.Type, name string) (alloca, bitcast, size llvm.Value) {
 	return llvmutil.CreateTemporaryAlloca(b.Builder, b.mod, t, name)
+}
+
+// insertBasicBlock inserts a new basic block after the current basic block.
+// This is useful when inserting new basic blocks while converting a
+// *ssa.BasicBlock to a llvm.BasicBlock and the LLVM basic block needs some
+// extra blocks.
+// It does not update b.blockExits, this must be done by the caller.
+func (b *builder) insertBasicBlock(name string) llvm.BasicBlock {
+	currentBB := b.Builder.GetInsertBlock()
+	nextBB := llvm.NextBasicBlock(currentBB)
+	if nextBB.IsNil() {
+		// Last basic block in the function, so add one to the end.
+		return b.ctx.AddBasicBlock(b.llvmFn, name)
+	}
+	// Insert a basic block before the next basic block - that is, at the
+	// current insert location.
+	return b.ctx.InsertBasicBlock(nextBB, name)
 }
 
 // emitLifetimeEnd signals the end of an (alloca) lifetime by calling the
@@ -252,4 +270,44 @@ func (c *compilerContext) getPointerBitmap(typ llvm.Type, pos token.Pos) *big.In
 		// Should not happen.
 		panic("unknown LLVM type")
 	}
+}
+
+// archFamily returns the archtecture from the LLVM triple but with some
+// architecture names ("armv6", "thumbv7m", etc) merged into a single
+// architecture name ("arm").
+func (c *compilerContext) archFamily() string {
+	arch := strings.Split(c.Triple, "-")[0]
+	if strings.HasPrefix(arch, "arm") || strings.HasPrefix(arch, "thumb") {
+		return "arm"
+	}
+	return arch
+}
+
+// isThumb returns whether we're in ARM or in Thumb mode. It panics if the
+// features string is not one for an ARM architecture.
+func (c *compilerContext) isThumb() bool {
+	var isThumb, isNotThumb bool
+	for _, feature := range strings.Split(c.Features, ",") {
+		if feature == "+thumb-mode" {
+			isThumb = true
+		}
+		if feature == "-thumb-mode" {
+			isNotThumb = true
+		}
+	}
+	if isThumb == isNotThumb {
+		panic("unexpected feature flags")
+	}
+	return isThumb
+}
+
+// readStackPointer emits a LLVM intrinsic call that returns the current stack
+// pointer as an *i8.
+func (b *builder) readStackPointer() llvm.Value {
+	stacksave := b.mod.NamedFunction("llvm.stacksave")
+	if stacksave.IsNil() {
+		fnType := llvm.FunctionType(b.i8ptrType, nil, false)
+		stacksave = llvm.AddFunction(b.mod, "llvm.stacksave", fnType)
+	}
+	return b.CreateCall(stacksave, nil, "")
 }

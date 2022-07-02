@@ -115,3 +115,8 @@ func divideByZeroPanic() {
 func blockingPanic() {
 	runtimePanic("trying to do blocking operation in exported function")
 }
+
+// Panic when trying to add an entry to a nil map
+func nilMapPanic() {
+	runtimePanic("assignment to entry in nil map")
+}

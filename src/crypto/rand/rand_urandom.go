@@ -1,3 +1,4 @@
+//go:build linux && !baremetal && !wasi && !eosio
 // +build linux,!baremetal,!wasi,!eosio
 
 // This implementation of crypto/rand uses the /dev/urandom pseudo-file to
