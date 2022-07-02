@@ -661,7 +661,7 @@ func (t *CodeGenerator) parseTableIndex(field *ast.Field, info *TableInfo) error
 		if len(indexInfo) == 1 {
 			ty, _ := parseType(field)
 			if len(field.Names) != 1 {
-				errMsg := fmt.Sprintf("primary field can not have multiple names", info.TableName)
+				errMsg := fmt.Sprintf("primary field can not have multiple names %s", info.TableName)
 				return t.newError(comment.Pos(), errMsg)
 			}
 			if ty == "uint64" {

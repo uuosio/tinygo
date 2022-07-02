@@ -76,7 +76,7 @@ func runtimePanic(msg string) {
 }
 
 // Try to recover a panicking goroutine.
-func _recover() interface{} {
+func _recover(useParentFrame bool) interface{} {
 	// Deferred functions are currently not executed during panic, so there is
 	// no way this can return anything besides nil.
 	return nil

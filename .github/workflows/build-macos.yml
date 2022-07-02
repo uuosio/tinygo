@@ -107,6 +107,6 @@ jobs:
         with:
           files: |
             build/tinygo.darwin-amd64.tar.gz
-      - name: Smoke tests
-        shell: bash
-        run: make smoketest TINYGO=$(PWD)/build/tinygo AVR=0
+      # - name: Smoke tests
+      #   shell: bash
+      #   run: make smoketest TINYGO=$(PWD)/build/tinygo AVR=0
