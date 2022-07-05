@@ -73,11 +73,11 @@ type ActionInfo struct {
 }
 
 type SecondaryIndexInfo struct {
-	Type   string
-	DBType string
-	Name   string
-	Getter string
-	Setter string
+	Type      string
+	TableType string
+	Name      string
+	Getter    string
+	Setter    string
 }
 
 const (
@@ -690,19 +690,19 @@ func (t *CodeGenerator) parseTableIndex(field *ast.Field, info *TableInfo) error
 		var dbType string
 		var idx string
 		if ty == "uint64" {
-			dbType = "IdxDB64"
+			dbType = "IdxTable64"
 			idx = "IDX64"
 		} else if ty == "chain.Uint128" {
-			dbType = "IdxDB128"
+			dbType = "IdxTable128"
 			idx = "IDX128"
 		} else if ty == "chain.Uint256" {
-			dbType = "IdxDB256"
+			dbType = "IdxTable256"
 			idx = "IDX256"
 		} else if ty == "float64" {
-			dbType = "IdxDBFloat64"
+			dbType = "IdxTableFloat64"
 			idx = "IDXFloat64"
 		} else if ty == "chain.Float128" {
-			dbType = "IdxDBFloat128"
+			dbType = "IdxTableFloat128"
 			idx = "IDXFloat128"
 		}
 		getter := fmt.Sprintf("t.%s", name)
@@ -715,7 +715,7 @@ func (t *CodeGenerator) parseTableIndex(field *ast.Field, info *TableInfo) error
 			return t.newError(comment.Pos(), errMsg)
 		}
 		if len(indexInfo) != 4 {
-			errMsg := fmt.Sprintf("Invalid index DB in struct %s: %s", info.StructInfo.StructName, indexText)
+			errMsg := fmt.Sprintf("Invalid index Table in struct %s: %s", info.StructInfo.StructName, indexText)
 			return t.newError(comment.Pos(), errMsg)
 		}
 
@@ -742,7 +742,7 @@ func (t *CodeGenerator) parseTableIndex(field *ast.Field, info *TableInfo) error
 			return t.newError(comment.Pos(), "Invalid setter in: "+indexText)
 		}
 
-		dbType := indexTypeToSecondaryDBName(idx)
+		dbType := indexTypeToSecondaryTableName(idx)
 		indexInfo := SecondaryIndexInfo{idx, dbType, name, getter, setter}
 		info.SecondaryIndexes = append(info.SecondaryIndexes, indexInfo)
 	}
@@ -1442,7 +1442,7 @@ func (t *CodeGenerator) GenCode(generatedFile string) error {
 	for i := range t.tables {
 		table := t.tables[i]
 
-		t.writeCodeEx(cTableTemplate, table)
+		t.writeCodeEx(cSecondaryValueTemplate, table)
 
 		//generate singleton db code
 		if table.Singleton {
@@ -1458,8 +1458,8 @@ func (t *CodeGenerator) GenCode(generatedFile string) error {
 			t.writeCode("}")
 		}
 
-		t.writeCodeEx(cDBTemplate, &table.StructInfo)
-		// t.writeCode(cDBTemplate, table.StructName, StringToName(table.TableName), table.TableName)
+		t.writeCodeEx(cTableTemplate, &table.StructInfo)
+		// t.writeCode(cTableTemplate, table.StructName, StringToName(table.TableName), table.TableName)
 
 		n := NewTableTemplate(table.StructInfo.StructName, table.TableName, table.SecondaryIndexes)
 		t.writeCodeEx(cNewMultiIndexTemplate, n)

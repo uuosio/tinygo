@@ -1,15 +1,15 @@
 package main
 
-const cDBTemplate = `
-type {{.StructName}}DB struct {
+const cTableTemplate = `
+type {{.StructName}}Table struct {
 	database.MultiIndexInterface
 }
 
-func (mi *{{.StructName}}DB) Store(v *{{.StructName}}, payer chain.Name) {
+func (mi *{{.StructName}}Table) Store(v *{{.StructName}}, payer chain.Name) {
 	mi.MultiIndexInterface.Store(v, payer)
 }
 
-func (mi *{{.StructName}}DB) GetByKey(id uint64) (*database.Iterator, *{{.StructName}}) {
+func (mi *{{.StructName}}Table) GetByKey(id uint64) (*database.Iterator, *{{.StructName}}) {
 	it, data := mi.MultiIndexInterface.GetByKey(id)
 	if !it.IsOk() {
 		return it, nil
@@ -17,18 +17,18 @@ func (mi *{{.StructName}}DB) GetByKey(id uint64) (*database.Iterator, *{{.Struct
 	return it, data.(*{{.StructName}})
 }
 
-func (mi *{{.StructName}}DB) GetByIterator(it *database.Iterator) *{{.StructName}} {
+func (mi *{{.StructName}}Table) GetByIterator(it *database.Iterator) *{{.StructName}} {
 	data := mi.MultiIndexInterface.GetByIterator(it)
 	return data.(*{{.StructName}})
 }
 
-func (mi *{{.StructName}}DB) Update(it *database.Iterator, v *{{.StructName}}, payer chain.Name) {
+func (mi *{{.StructName}}Table) Update(it *database.Iterator, v *{{.StructName}}, payer chain.Name) {
 	mi.MultiIndexInterface.Update(it, v, payer)
 }
 `
 
 const cNewMultiIndexTemplate = `
-func New{{.Name}}DB(code chain.Name, scope chain.Name) *{{.Name}}DB {
+func New{{.Name}}Table(code chain.Name, scope chain.Name) *{{.Name}}Table {
 	table := chain.Name{N:uint64({{.TableName}})} //table name: {{.Name}}
 	if table.N&uint64(0x0f) != 0 {
 		// Limit table names to 12 characters so that the last character (4 bits) can be used to distinguish between the secondary indices.
@@ -37,23 +37,23 @@ func New{{.Name}}DB(code chain.Name, scope chain.Name) *{{.Name}}DB {
 
 	mi := &database.MultiIndex{}
 	mi.SetTable(code, scope, table)
-	mi.DB = database.NewDBI64(code, scope, table, func(data []byte) database.DBValue {
+	mi.Table = database.NewTableI64(code, scope, table, func(data []byte) database.TableValue {
 		return mi.Unpack(data)
 	})
-	mi.IdxDBNameToIndex = {{.Name}}DBNameToIndex
+	mi.IdxTableNameToIndex = {{.Name}}TableNameToIndex
 	mi.IndexTypes = {{.Name}}SecondaryTypes
-	mi.IDXDBs = make([]database.SecondaryDB, len({{.Name}}SecondaryTypes))
+	mi.IDXTables = make([]database.SecondaryTable, len({{.Name}}SecondaryTypes))
 	mi.Unpack = {{.Name}}Unpacker
 
 {{- range $i, $val := .Indexes}}
-	mi.IDXDBs[{{$i}}] = database.New{{$val.DBType}}({{$i}}, code.N, scope.N, uint64({{$.FirstIdxTableName}})+{{$i}})
+	mi.IDXTables[{{$i}}] = database.New{{$val.TableType}}({{$i}}, code.N, scope.N, uint64({{$.FirstIdxTableName}})+{{$i}})
 {{- end}}
-	return &{{.Name}}DB{mi}
+	return &{{.Name}}Table{mi}
 }
 
 {{- range $i, $val := .Indexes}}
-func (mi *{{$.Name}}DB) GetIdxDBBy{{$val.Name}}() *database.{{$val.DBType}} {
-	return mi.GetIdxDBByIndex({{$i}}).(*database.{{$val.DBType}})
+func (mi *{{$.Name}}Table) GetIdxTableBy{{$val.Name}}() *database.{{$val.TableType}} {
+	return mi.GetIdxTableByIndex({{$i}}).(*database.{{$val.TableType}})
 }
 {{- end}}
 `
@@ -89,22 +89,22 @@ func (d *{{.Name}}) GetPrimary() uint64 {
 	return uint64({{.TableName}})
 }
 
-type {{.Name}}DB struct {
-	db *database.SingletonDB
+type {{.Name}}Table struct {
+	db *database.SingletonTable
 }
 
-func New{{.Name}}DB(code chain.Name, scope chain.Name) *{{.Name}}DB {
+func New{{.Name}}Table(code chain.Name, scope chain.Name) *{{.Name}}Table {
 	chain.Check(code != chain.Name{0}, "bad code name")
 	table := chain.Name{N:uint64({{.TableName}})}
-	db := database.NewSingletonDB(code, scope, table, {{.Name}}Unpacker)
-	return &{{.Name}}DB{db}
+	db := database.NewSingletonTable(code, scope, table, {{.Name}}Unpacker)
+	return &{{.Name}}Table{db}
 }
 
-func (t *{{.Name}}DB) Set(data *{{.Name}}, payer chain.Name) {
+func (t *{{.Name}}Table) Set(data *{{.Name}}, payer chain.Name) {
 	t.db.Set(data, payer)
 }
 
-func (t *{{.Name}}DB) Get() (*{{.Name}}) {
+func (t *{{.Name}}Table) Get() (*{{.Name}}) {
 	data := t.db.Get()
 	if data == nil {
 		return nil
@@ -112,7 +112,7 @@ func (t *{{.Name}}DB) Get() (*{{.Name}}) {
 	return data.(*{{.Name}})
 }
 
-func (t *{{.Name}}DB) Remove() {
+func (t *{{.Name}}Table) Remove() {
 	t.db.Remove()
 }
 `
@@ -355,7 +355,7 @@ print(r['processed']['action_traces'][0]['console'])
 
 const cReadMe = "# Building\n\n```bash\neosio-go build -o %[1]s.wasm .\n```\n\n# Testing\n```\npython3 test.py\n```"
 
-const cTableTemplate = `
+const cSecondaryValueTemplate = `
 var (
 	{{.StructInfo.StructName}}SecondaryTypes = []int{
 	{{- range $i, $val := .SecondaryIndexes}}
@@ -364,7 +364,7 @@ var (
 	}
 )
 
-func {{.StructInfo.StructName}}DBNameToIndex(indexName string) int {
+func {{.StructInfo.StructName}}TableNameToIndex(indexName string) int {
 	switch indexName {
 	{{- range $i, $val := .SecondaryIndexes}}
 		case "{{$val.Name}}":

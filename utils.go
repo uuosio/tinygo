@@ -405,18 +405,18 @@ func indexTypeToSecondaryType(indexType string) string {
 	return ""
 }
 
-func indexTypeToSecondaryDBName(indexType string) string {
+func indexTypeToSecondaryTableName(indexType string) string {
 	switch indexType {
 	case "IDX64":
-		return "IdxDB64"
+		return "IdxTable64"
 	case "IDX128":
-		return "IdxDB128"
+		return "IdxTable128"
 	case "IDX256":
-		return "IdxDB256"
+		return "IdxTable256"
 	case "IDXFloat64":
-		return "IdxDBFloat64"
+		return "IdxTableFloat64"
 	case "IDXFloat128":
-		return "IdxDBFloat128"
+		return "IdxTableFloat128"
 	default:
 		panic(fmt.Sprintf("unknown secondary index type: %s", indexType))
 	}
