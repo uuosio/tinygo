@@ -73,9 +73,7 @@ func (c *Config) BuildTags() []string {
 	for i := 1; i <= c.GoMinorVersion; i++ {
 		tags = append(tags, fmt.Sprintf("go1.%d", i))
 	}
-	if extraTags := strings.Fields(c.Options.Tags); len(extraTags) != 0 {
-		tags = append(tags, extraTags...)
-	}
+	tags = append(tags, c.Options.Tags...)
 	return tags
 }
 
@@ -175,6 +173,15 @@ func (c *Config) AutomaticStackSize() bool {
 		return *c.Target.AutoStackSize
 	}
 	return false
+}
+
+// StackSize returns the default stack size to be used for goroutines, if the
+// stack size could not be determined automatically at compile time.
+func (c *Config) StackSize() uint64 {
+	if c.Options.StackSize != 0 {
+		return c.Options.StackSize
+	}
+	return c.Target.DefaultStackSize
 }
 
 // UseThinLTO returns whether ThinLTO should be used for the given target. Some
@@ -384,8 +391,8 @@ func (c *Config) VerifyIR() bool {
 }
 
 // Debug returns whether debug (DWARF) information should be retained by the
-// linker. By default, debug information is retained but it can be removed with
-// the -no-debug flag.
+// linker. By default, debug information is retained, but it can be removed
+// with the -no-debug flag.
 func (c *Config) Debug() bool {
 	return c.Options.Debug
 }
@@ -456,13 +463,13 @@ func (c *Config) OpenOCDConfiguration() (args []string, err error) {
 	if openocdInterface == "" {
 		return nil, errors.New("OpenOCD programmer not set")
 	}
-	if !regexp.MustCompile("^[\\p{L}0-9_-]+$").MatchString(openocdInterface) {
+	if !regexp.MustCompile(`^[\p{L}0-9_-]+$`).MatchString(openocdInterface) {
 		return nil, fmt.Errorf("OpenOCD programmer has an invalid name: %#v", openocdInterface)
 	}
 	if c.Target.OpenOCDTarget == "" {
 		return nil, errors.New("OpenOCD chip not set")
 	}
-	if !regexp.MustCompile("^[\\p{L}0-9_-]+$").MatchString(c.Target.OpenOCDTarget) {
+	if !regexp.MustCompile(`^[\p{L}0-9_-]+$`).MatchString(c.Target.OpenOCDTarget) {
 		return nil, fmt.Errorf("OpenOCD target has an invalid name: %#v", c.Target.OpenOCDTarget)
 	}
 	if c.Target.OpenOCDTransport != "" && c.Target.OpenOCDTransport != "swd" {
@@ -473,7 +480,14 @@ func (c *Config) OpenOCDConfiguration() (args []string, err error) {
 		args = append(args, "-c", cmd)
 	}
 	if c.Target.OpenOCDTransport != "" {
-		args = append(args, "-c", "transport select "+c.Target.OpenOCDTransport)
+		transport := c.Target.OpenOCDTransport
+		if transport == "swd" {
+			switch openocdInterface {
+			case "stlink-dap":
+				transport = "dapdirect_swd"
+			}
+		}
+		args = append(args, "-c", "transport select "+transport)
 	}
 	args = append(args, "-f", "target/"+c.Target.OpenOCDTarget+".cfg")
 	return args, nil

@@ -6,8 +6,12 @@
 // For more information, see: https://shop.pimoroni.com/products/badger-2040
 // Also
 // - Badger 2040 schematic: https://cdn.shopify.com/s/files/1/0174/1800/files/badger_2040_schematic.pdf?v=1645702148
-//
 package machine
+
+import (
+	"device/rp"
+	"runtime/interrupt"
+)
 
 const (
 	LED Pin = GPIO25
@@ -53,14 +57,15 @@ const (
 
 // QSPI pins¿?
 const (
-/* TODO
+/*
+	TODO
+
 SPI0_SD0_PIN Pin = QSPI_SD0
 SPI0_SD1_PIN Pin = QSPI_SD1
 SPI0_SD2_PIN Pin = QSPI_SD2
 SPI0_SD3_PIN Pin = QSPI_SD3
 SPI0_SCK_PIN Pin = QSPI_SCLKGPIO6
 SPI0_CS_PIN  Pin = QSPI_CS
-
 */
 )
 
@@ -79,3 +84,26 @@ var (
 	usb_VID uint16 = 0x2e8a
 	usb_PID uint16 = 0x0003
 )
+
+// UART pins
+const (
+	UART0_TX_PIN = GPIO0
+	UART0_RX_PIN = GPIO1
+	UART_TX_PIN  = UART0_TX_PIN
+	UART_RX_PIN  = UART0_RX_PIN
+)
+
+// UART on the RP2040
+var (
+	UART0  = &_UART0
+	_UART0 = UART{
+		Buffer: NewRingBuffer(),
+		Bus:    rp.UART0,
+	}
+)
+
+var DefaultUART = UART0
+
+func init() {
+	UART0.Interrupt = interrupt.New(rp.IRQ_UART0_IRQ, _UART0.handleInterrupt)
+}

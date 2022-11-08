@@ -1,5 +1,5 @@
-//go:build nrf
-// +build nrf
+//go:build nrf && !nrf52840
+// +build nrf,!nrf52840
 
 package runtime
 
@@ -28,7 +28,7 @@ func main() {
 }
 
 func init() {
-	machine.Serial.Configure(machine.UARTConfig{})
+	machine.InitSerial()
 	initLFCLK()
 	initRTC()
 }

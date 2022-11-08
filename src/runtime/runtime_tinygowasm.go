@@ -19,6 +19,7 @@ func fd_write(id uint32, iovs *__wasi_iovec_t, iovs_len uint, nwritten *uint) (e
 
 // See:
 // https://github.com/WebAssembly/WASI/blob/main/phases/snapshot/docs.md#-proc_exitrval-exitcode
+//
 //go:wasm-module wasi_snapshot_preview1
 //export proc_exit
 func proc_exit(exitcode uint32)
@@ -47,6 +48,16 @@ func putchar(c byte) {
 		fd_write(stdout, &putcharIOVec, 1, &putcharNWritten)
 		putcharPosition = 0
 	}
+}
+
+func getchar() byte {
+	// dummy, TODO
+	return 0
+}
+
+func buffered() int {
+	// dummy, TODO
+	return 0
 }
 
 //go:linkname now time.now

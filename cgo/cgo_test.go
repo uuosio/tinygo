@@ -5,12 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
-	"go/build"
 	"go/format"
 	"go/parser"
 	"go/token"
 	"go/types"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -40,20 +39,6 @@ func TestCGo(t *testing.T) {
 	} {
 		name := name // avoid a race condition
 		t.Run(name, func(t *testing.T) {
-			// Skip tests that require specific Go version.
-			if name == "errors" {
-				ok := false
-				for _, version := range build.Default.ReleaseTags {
-					if version == "go1.16" {
-						ok = true
-						break
-					}
-				}
-				if !ok {
-					t.Skip("Results for errors test are only valid for Go 1.16+")
-				}
-			}
-
 			// Read the AST in memory.
 			path := filepath.Join("testdata", name+".go")
 			fset := token.NewFileSet()
@@ -63,7 +48,7 @@ func TestCGo(t *testing.T) {
 			}
 
 			// Process the AST with CGo.
-			cgoAST, _, _, _, _, cgoErrors := Process([]*ast.File{f}, "testdata", fset, cflags, "")
+			cgoAST, _, _, _, _, cgoErrors := Process([]*ast.File{f}, "testdata", "main", fset, cflags, "")
 
 			// Check the AST for type errors.
 			var typecheckErrors []error
@@ -107,7 +92,7 @@ func TestCGo(t *testing.T) {
 
 			// Read the file with the expected output, to compare against.
 			outfile := filepath.Join("testdata", name+".out.go")
-			expectedBytes, err := ioutil.ReadFile(outfile)
+			expectedBytes, err := os.ReadFile(outfile)
 			if err != nil {
 				t.Fatalf("could not read expected output: %v", err)
 			}
@@ -118,13 +103,91 @@ func TestCGo(t *testing.T) {
 				// It is not. Test failed.
 				if *flagUpdate {
 					// Update the file with the expected data.
-					err := ioutil.WriteFile(outfile, []byte(actual), 0666)
+					err := os.WriteFile(outfile, []byte(actual), 0666)
 					if err != nil {
 						t.Error("could not write updated output file:", err)
 					}
 					return
 				}
 				t.Errorf("output did not match:\n%s", string(actual))
+			}
+		})
+	}
+}
+
+func Test_cgoPackage_isEquivalentAST(t *testing.T) {
+	fieldA := &ast.Field{Type: &ast.BasicLit{Kind: token.STRING, Value: "a"}}
+	fieldB := &ast.Field{Type: &ast.BasicLit{Kind: token.STRING, Value: "b"}}
+	listOfFieldA := &ast.FieldList{List: []*ast.Field{fieldA}}
+	listOfFieldB := &ast.FieldList{List: []*ast.Field{fieldB}}
+	funcDeclA := &ast.FuncDecl{Name: &ast.Ident{Name: "a"}, Type: &ast.FuncType{Params: &ast.FieldList{}, Results: listOfFieldA}}
+	funcDeclB := &ast.FuncDecl{Name: &ast.Ident{Name: "b"}, Type: &ast.FuncType{Params: &ast.FieldList{}, Results: listOfFieldB}}
+	funcDeclNoResults := &ast.FuncDecl{Name: &ast.Ident{Name: "C"}, Type: &ast.FuncType{Params: &ast.FieldList{}}}
+
+	testCases := []struct {
+		name     string
+		a, b     ast.Node
+		expected bool
+	}{
+		{
+			name:     "both nil",
+			expected: true,
+		},
+		{
+			name:     "not same type",
+			a:        fieldA,
+			b:        &ast.FuncDecl{},
+			expected: false,
+		},
+		{
+			name:     "Field same",
+			a:        fieldA,
+			b:        fieldA,
+			expected: true,
+		},
+		{
+			name:     "Field different",
+			a:        fieldA,
+			b:        fieldB,
+			expected: false,
+		},
+		{
+			name:     "FuncDecl Type Results nil",
+			a:        funcDeclNoResults,
+			b:        funcDeclNoResults,
+			expected: true,
+		},
+		{
+			name:     "FuncDecl Type Results same",
+			a:        funcDeclA,
+			b:        funcDeclA,
+			expected: true,
+		},
+		{
+			name:     "FuncDecl Type Results different",
+			a:        funcDeclA,
+			b:        funcDeclB,
+			expected: false,
+		},
+		{
+			name:     "FuncDecl Type Results a nil",
+			a:        funcDeclNoResults,
+			b:        funcDeclB,
+			expected: false,
+		},
+		{
+			name:     "FuncDecl Type Results b nil",
+			a:        funcDeclA,
+			b:        funcDeclNoResults,
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &cgoPackage{}
+			if got := p.isEquivalentAST(tc.a, tc.b); tc.expected != got {
+				t.Errorf("expected %v, got %v", tc.expected, got)
 			}
 		})
 	}

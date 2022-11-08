@@ -4,7 +4,7 @@
 package machine
 
 // used to reset into bootloader
-const RESET_MAGIC_VALUE = 0xf01669ef
+const resetMagicValue = 0xf01669ef
 
 const (
 	ADC0 = A0
@@ -349,8 +349,11 @@ var (
 
 	UART1 = &sercomUSART2
 
-	// RTL8720D
+	// RTL8720D (tx: PC22, rx: PC23)
 	UART2 = &sercomUSART1
+
+	// RTL8720D (tx: PB24, rx: PC24)
+	UART3 = &sercomUSART0
 )
 
 // I2C pins

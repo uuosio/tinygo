@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var (
@@ -27,8 +28,10 @@ type Options struct {
 	GC              string
 	PanicStrategy   string
 	Scheduler       string
+	StackSize       uint64 // goroutine stack size (if none could be automatically determined)
 	Serial          string
 	Work            bool // -work flag to print temporary build directory
+	InterpTimeout   time.Duration
 	PrintIR         bool
 	DumpSSA         bool
 	VerifyIR        bool
@@ -38,7 +41,7 @@ type Options struct {
 	PrintSizes      string
 	PrintAllocs     *regexp.Regexp // regexp string
 	PrintStacks     bool
-	Tags            string
+	Tags            []string
 	WasmAbi         string
 	GlobalValues    map[string]map[string]string // map[pkgpath]map[varname]value
 	TestConfig      TestConfig
@@ -49,6 +52,8 @@ type Options struct {
 	GenCode         bool
 	Strip           bool
 	PrintJSON       bool
+	Monitor         bool
+	BaudRate        int
 }
 
 // Verify performs a validation on the given options, raising an error if options are not valid.

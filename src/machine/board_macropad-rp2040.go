@@ -3,6 +3,11 @@
 
 package machine
 
+import (
+	"device/rp"
+	"runtime/interrupt"
+)
+
 const (
 	NeopixelCount = 12
 
@@ -47,8 +52,8 @@ const (
 	I2C0_SDA_PIN = GPIO20
 	I2C0_SCL_PIN = GPIO21
 
-	I2C1_SDA_PIN = 31 // not pinned out
-	I2C1_SCL_PIN = 31 // not pinned out
+	I2C1_SDA_PIN = NoPin // not pinned out
+	I2C1_SCL_PIN = NoPin // not pinned out
 )
 
 // SPI default pins
@@ -60,7 +65,41 @@ const (
 	// Default Serial In Bus 1 for SPI communications
 	SPI1_SDI_PIN = GPIO28 // Rx
 
-	SPI0_SCK_PIN = 31 // not pinned out
-	SPI0_SDO_PIN = 31 // not pinned out
-	SPI0_SDI_PIN = 31 // not pinned out
+	SPI0_SCK_PIN = NoPin // not pinned out
+	SPI0_SDO_PIN = NoPin // not pinned out
+	SPI0_SDI_PIN = NoPin // not pinned out
+)
+
+// UART pins
+const (
+	UART0_TX_PIN = GPIO0
+	UART0_RX_PIN = GPIO1
+	UART_TX_PIN  = UART0_TX_PIN
+	UART_RX_PIN  = UART0_RX_PIN
+)
+
+// UART on the RP2040
+var (
+	UART0  = &_UART0
+	_UART0 = UART{
+		Buffer: NewRingBuffer(),
+		Bus:    rp.UART0,
+	}
+)
+
+var DefaultUART = UART0
+
+func init() {
+	UART0.Interrupt = interrupt.New(rp.IRQ_UART0_IRQ, _UART0.handleInterrupt)
+}
+
+// USB identifiers
+const (
+	usb_STRING_PRODUCT      = "MacroPad RP2040"
+	usb_STRING_MANUFACTURER = "Adafruit"
+)
+
+var (
+	usb_VID uint16 = 0x239A
+	usb_PID uint16 = 0x8107
 )

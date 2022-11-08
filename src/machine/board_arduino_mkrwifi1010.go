@@ -4,17 +4,13 @@
 // This contains the pin mappings for the Arduino MKR WiFi 1010 board.
 //
 // For more information, see: https://store.arduino.cc/usa/mkr-wifi-1010
-//
 package machine
 
 // used to reset into bootloader
-const RESET_MAGIC_VALUE = 0x07738135
+const resetMagicValue = 0x07738135
 
 // GPIO Pins
 const (
-	RX0 Pin = PB23 // UART1 RX
-	TX1 Pin = PB22 // UART1 TX
-
 	D0 Pin = PA22 // PWM available
 	D1 Pin = PA23 // PWM available
 	D2 Pin = PA10 // PWM available
@@ -31,6 +27,9 @@ const (
 	D12 Pin = PA09 // PWM available, SCL
 	D13 Pin = PB23 // RX
 	D14 Pin = PB22 // TX
+
+	RX0 Pin = PB23 // UART1 RX
+	TX1 Pin = PB22 // UART1 TX
 )
 
 // Analog pins

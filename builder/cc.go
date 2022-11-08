@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,29 +33,29 @@ import (
 // Because of this complexity, every file has in fact two cached build outputs:
 // the file itself, and the list of dependencies. Its operation is as follows:
 //
-//   depfile = hash(path, compiler, cflags, ...)
-//   if depfile exists:
-//     outfile = hash of all files and depfile name
-//     if outfile exists:
-//       # cache hit
-//       return outfile
-//   # cache miss
-//   tmpfile = compile file
-//   read dependencies (side effect of compile)
-//   write depfile
-//   outfile = hash of all files and depfile name
-//   rename tmpfile to outfile
+//	depfile = hash(path, compiler, cflags, ...)
+//	if depfile exists:
+//	  outfile = hash of all files and depfile name
+//	  if outfile exists:
+//	    # cache hit
+//	    return outfile
+//	# cache miss
+//	tmpfile = compile file
+//	read dependencies (side effect of compile)
+//	write depfile
+//	outfile = hash of all files and depfile name
+//	rename tmpfile to outfile
 //
 // There are a few edge cases that are not handled:
-// - If a file is added to an include path, that file may be included instead of
-//   some other file. This would be fixed by also including lookup failures in the
-//   dependencies file, but I'm not aware of a compiler which does that.
-// - The Makefile syntax that compilers output has issues, see readDepFile for
-//   details.
-// - A header file may be changed to add/remove an include. This invalidates the
-//   depfile but without invalidating its name. For this reason, the depfile is
-//   written on each new compilation (even when it seems unnecessary). However, it
-//   could in rare cases lead to a stale file fetched from the cache.
+//   - If a file is added to an include path, that file may be included instead of
+//     some other file. This would be fixed by also including lookup failures in the
+//     dependencies file, but I'm not aware of a compiler which does that.
+//   - The Makefile syntax that compilers output has issues, see readDepFile for
+//     details.
+//   - A header file may be changed to add/remove an include. This invalidates the
+//     depfile but without invalidating its name. For this reason, the depfile is
+//     written on each new compilation (even when it seems unnecessary). However, it
+//     could in rare cases lead to a stale file fetched from the cache.
 func compileAndCacheCFile(abspath, tmpdir string, cflags []string, thinlto bool, printCommands func(string, ...string)) (string, error) {
 	// Hash input file.
 	fileHash, err := hashFile(abspath)
@@ -93,7 +93,7 @@ func compileAndCacheCFile(abspath, tmpdir string, cflags []string, thinlto bool,
 	// Load dependencies file, if possible.
 	depfileName := "dep-" + depfileNameHash + ".json"
 	depfileCachePath := filepath.Join(goenv.Get("GOCACHE"), depfileName)
-	depfileBuf, err := ioutil.ReadFile(depfileCachePath)
+	depfileBuf, err := os.ReadFile(depfileCachePath)
 	var dependencies []string // sorted list of dependency paths
 	if err == nil {
 		// There is a dependency file, that's great!
@@ -108,21 +108,21 @@ func compileAndCacheCFile(abspath, tmpdir string, cflags []string, thinlto bool,
 		if err == nil {
 			if _, err := os.Stat(outpath); err == nil {
 				return outpath, nil
-			} else if !os.IsNotExist(err) {
+			} else if !errors.Is(err, fs.ErrNotExist) {
 				return "", err
 			}
 		}
-	} else if !os.IsNotExist(err) {
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		// expected either nil or IsNotExist
 		return "", err
 	}
 
-	objTmpFile, err := ioutil.TempFile(goenv.Get("GOCACHE"), "tmp-*"+ext)
+	objTmpFile, err := os.CreateTemp(goenv.Get("GOCACHE"), "tmp-*"+ext)
 	if err != nil {
 		return "", err
 	}
 	objTmpFile.Close()
-	depTmpFile, err := ioutil.TempFile(tmpdir, "dep-*.d")
+	depTmpFile, err := os.CreateTemp(tmpdir, "dep-*.d")
 	if err != nil {
 		return "", err
 	}
@@ -166,7 +166,7 @@ func compileAndCacheCFile(abspath, tmpdir string, cflags []string, thinlto bool,
 	sort.Strings(dependencySlice)
 
 	// Write dependencies file.
-	f, err := ioutil.TempFile(filepath.Dir(depfileCachePath), depfileName)
+	f, err := os.CreateTemp(filepath.Dir(depfileCachePath), depfileName)
 	if err != nil {
 		return "", err
 	}
@@ -252,13 +252,14 @@ func hashFile(path string) (string, error) {
 // file is assumed to have a single target named deps.
 //
 // There are roughly three make syntax variants:
-// - BSD make, which doesn't support any escaping. This means that many special
-//   characters are not supported in file names.
-// - GNU make, which supports escaping using a backslash but when it fails to
-//   find a file it tries to fall back with the literal path name (to match BSD
-//   make).
-// - NMake (Visual Studio) and Jom, which simply quote the string if there are
-//   any weird characters.
+//   - BSD make, which doesn't support any escaping. This means that many special
+//     characters are not supported in file names.
+//   - GNU make, which supports escaping using a backslash but when it fails to
+//     find a file it tries to fall back with the literal path name (to match BSD
+//     make).
+//   - NMake (Visual Studio) and Jom, which simply quote the string if there are
+//     any weird characters.
+//
 // Clang supports two variants: a format that's a compromise between BSD and GNU
 // make (and is buggy to match GCC which is equally buggy), and NMake/Jom, which
 // is at least somewhat sane. This last format isn't perfect either: it does not
@@ -266,7 +267,7 @@ func hashFile(path string) (string, error) {
 // allowed on Windows, but of course can be used on POSIX like systems. Still,
 // it's the most sane of any of the formats so readDepFile will use that format.
 func readDepFile(filename string) ([]string, error) {
-	buf, err := ioutil.ReadFile(filename)
+	buf, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}

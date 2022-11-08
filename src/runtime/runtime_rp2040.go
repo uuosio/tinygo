@@ -5,8 +5,8 @@ package runtime
 
 import (
 	"device/arm"
-
 	"machine"
+	"machine/usb/cdc"
 )
 
 // machineTicks is provided by package machine.
@@ -76,7 +76,9 @@ func machineInit()
 func init() {
 	machineInit()
 
-	machine.Serial.Configure(machine.UARTConfig{})
+	cdc.EnableUSBCDC()
+	machine.USBDev.Configure(machine.UARTConfig{})
+	machine.InitSerial()
 }
 
 //export Reset_Handler

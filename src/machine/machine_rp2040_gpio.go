@@ -181,6 +181,7 @@ func (p Pin) Configure(config PinConfig) {
 		rp.SIO.GPIO_OE_SET.Set(mask)
 	case PinInput:
 		p.setFunc(fnSIO)
+		p.pulloff()
 	case PinInputPulldown:
 		p.setFunc(fnSIO)
 		p.pulldown()
@@ -225,12 +226,8 @@ type PinChange uint8
 
 // Pin change interrupt constants for SetInterrupt.
 const (
-	// PinLevelLow triggers whenever pin is at a low (around 0V) logic level.
-	PinLevelLow PinChange = 1 << iota
-	// PinLevelLow triggers whenever pin is at a high (around 3V) logic level.
-	PinLevelHigh
 	// Edge falling
-	PinFalling
+	PinFalling PinChange = 4 << iota
 	// Edge rising
 	PinRising
 )

@@ -16,35 +16,36 @@ concurrency:
 jobs:
   build-linux:
     # Build Linux binaries, ready for release.
-    # This intentionally uses an older Linux image, so that we compile against
-    # an older glibc version and therefore are compatible with a wide range of
-    # Linux distributions.
-    runs-on: ubuntu-18.04
+    # This runs inside an Alpine Linux container so we can more easily create a
+    # statically linked binary.
+    runs-on: ubuntu-latest
+    container:
+      image: golang:1.19-alpine
     steps:
+      - name: Install apk dependencies
+        # tar: needed for actions/cache@v3
+        # git+openssh: needed for checkout (I think?)
+        # ruby: needed to install fpm
+        run: apk add tar git openssh make g++ ruby
+      - name: Work around CVE-2022-24765
+        # We're not on a multi-user machine, so this is safe.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout
         uses: actions/checkout@v2
         with:
           submodules: true
-      - name: Install apt dependencies
-        run: |
-          sudo apt-get install --no-install-recommends \
-              ninja-build
-      - name: Install Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: '1.18.1'
       - name: Cache Go
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
-          key: go-cache-linux-v1-${{ hashFiles('go.mod') }}
+          key: go-cache-linux-alpine-v1-${{ hashFiles('go.mod') }}
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
       - name: Cache LLVM source
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-llvm-source
         with:
-          key: llvm-source-14-linux-v2
+          key: llvm-source-14-linux-alpine-v1
           path: |
             llvm-project/clang/lib/Headers
             llvm-project/clang/include
@@ -55,10 +56,10 @@ jobs:
         if: steps.cache-llvm-source.outputs.cache-hit != 'true'
         run: make llvm-source
       - name: Cache LLVM build
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-llvm-build
         with:
-          key: llvm-build-14-linux-v1
+          key: llvm-build-14-linux-alpine-v1
           path: llvm-build
       - name: Build LLVM
         if: steps.cache-llvm-build.outputs.cache-hit != 'true'
@@ -66,24 +67,28 @@ jobs:
           # fetch LLVM source
           rm -rf llvm-project
           make llvm-source
+          # install dependencies
+          apk add cmake samurai python3
           # build!
           make llvm-build
           # Remove unnecessary object files (to reduce cache size).
           find llvm-build -name CMakeFiles -prune -exec rm -r '{}' \;
       - name: Cache Binaryen
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-binaryen
         with:
-          key: binaryen-linux-v1
+          key: binaryen-linux-alpine-v1
           path: build/wasm-opt
       - name: Build Binaryen
         if: steps.cache-binaryen.outputs.cache-hit != 'true'
-        run: make binaryen
+        run: |
+          apk add cmake samurai python3
+          make binaryen STATIC=1
       - name: Cache wasi-libc
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-wasi-libc
         with:
-          key: wasi-libc-sysroot-linux-asserts-v5
+          key: wasi-libc-sysroot-linux-alpine-v1
           path: lib/wasi-libc/sysroot
       - name: Build wasi-libc
         if: steps.cache-wasi-libc.outputs.cache-hit != 'true'
@@ -92,10 +97,12 @@ jobs:
         run: make eosio-libs
       - name: Install fpm
         run: |
-          sudo gem install --no-document fpm
+          gem install --version 4.0.7 public_suffix
+          gem install --version 2.7.6 dotenv
+          gem install --no-document fpm
       - name: Build TinyGo release
         run: |
-          make release deb -j3
+          make release deb -j3 STATIC=1
           cp -p build/release.tar.gz /tmp/tinygo.linux-amd64.tar.gz
           cp -p build/release.deb    /tmp/tinygo_amd64.deb
       - name: Publish release artifact
@@ -133,18 +140,12 @@ jobs:
               g++-arm-linux-gnueabihf \
               libc6-dev-armhf-cross
       - name: Install Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v3
         with:
-          go-version: '1.18.1'
-      - name: Cache Go
-        uses: actions/cache@v2
-        with:
-          key: go-cache-linux-arm-v2-${{ hashFiles('go.mod') }}
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
+          go-version: '1.19'
+          cache: true
       - name: Cache LLVM source
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-llvm-source
         with:
           key: llvm-source-14-linux-v2
@@ -158,7 +159,7 @@ jobs:
         if: steps.cache-llvm-source.outputs.cache-hit != 'true'
         run: make llvm-source
       - name: Cache LLVM build
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-llvm-build
         with:
           key: llvm-build-14-linux-arm-v1
@@ -176,7 +177,7 @@ jobs:
           # Remove unnecessary object files (to reduce cache size).
           find llvm-build -name CMakeFiles -prune -exec rm -r '{}' \;
       - name: Cache Binaryen
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-binaryen
         with:
           key: binaryen-linux-arm-v1
@@ -189,6 +190,8 @@ jobs:
           make CROSS=arm-linux-gnueabihf binaryen
       - name: Install fpm
         run: |
+          sudo gem install --version 4.0.7 public_suffix
+          sudo gem install --version 2.7.6 dotenv
           sudo gem install --no-document fpm
       - name: Build TinyGo binary
         run: |
@@ -243,18 +246,12 @@ jobs:
               libc6-dev-arm64-cross \
               ninja-build
       - name: Install Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v3
         with:
-          go-version: '1.18.1'
-      - name: Cache Go
-        uses: actions/cache@v2
-        with:
-          key: go-cache-linux-arm64-v2-${{ hashFiles('go.mod') }}
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
+          go-version: '1.19'
+          cache: true
       - name: Cache LLVM source
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-llvm-source
         with:
           key: llvm-source-14-linux-v1
@@ -268,7 +265,7 @@ jobs:
         if: steps.cache-llvm-source.outputs.cache-hit != 'true'
         run: make llvm-source
       - name: Cache LLVM build
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-llvm-build
         with:
           key: llvm-build-14-linux-arm64-v1
@@ -284,7 +281,7 @@ jobs:
           # Remove unnecessary object files (to reduce cache size).
           find llvm-build -name CMakeFiles -prune -exec rm -r '{}' \;
       - name: Cache Binaryen
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: cache-binaryen
         with:
           key: binaryen-linux-arm64-v1
@@ -296,6 +293,8 @@ jobs:
           make CROSS=aarch64-linux-gnu binaryen
       - name: Install fpm
         run: |
+          sudo gem install --version 4.0.7 public_suffix
+          sudo gem install --version 2.7.6 dotenv
           sudo gem install --no-document fpm
       - name: Build TinyGo binary
         run: |

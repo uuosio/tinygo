@@ -50,21 +50,29 @@ const (
 )
 
 const (
-	__WASI_OFLAGS_CREAT   = 1
-	__WASI_FDFLAGS_APPEND = 1
-	__WASI_OFLAGS_EXCL    = 4
-	__WASI_OFLAGS_TRUNC   = 8
-	__WASI_FDFLAGS_SYNC   = 16
+	__WASI_OFLAGS_CREAT = 1
+	__WASI_OFLAGS_EXCL  = 4
+	__WASI_OFLAGS_TRUNC = 8
+
+	__WASI_FDFLAGS_APPEND   = 1
+	__WASI_FDFLAGS_DSYNC    = 2
+	__WASI_FDFLAGS_NONBLOCK = 4
+	__WASI_FDFLAGS_RSYNC    = 8
+	__WASI_FDFLAGS_SYNC     = 16
 
 	O_RDONLY = 0x04000000
 	O_WRONLY = 0x10000000
 	O_RDWR   = O_RDONLY | O_WRONLY
 
-	O_CREAT  = __WASI_OFLAGS_CREAT << 12
-	O_TRUNC  = __WASI_OFLAGS_TRUNC << 12
-	O_APPEND = __WASI_FDFLAGS_APPEND
-	O_EXCL   = __WASI_OFLAGS_EXCL << 12
-	O_SYNC   = __WASI_FDFLAGS_SYNC
+	O_CREAT = __WASI_OFLAGS_CREAT << 12
+	O_TRUNC = __WASI_OFLAGS_TRUNC << 12
+	O_EXCL  = __WASI_OFLAGS_EXCL << 12
+
+	O_APPEND   = __WASI_FDFLAGS_APPEND
+	O_DSYNC    = __WASI_FDFLAGS_DSYNC
+	O_NONBLOCK = __WASI_FDFLAGS_NONBLOCK
+	O_RSYNC    = __WASI_FDFLAGS_RSYNC
+	O_SYNC     = __WASI_FDFLAGS_SYNC
 
 	O_CLOEXEC = 0
 
@@ -302,13 +310,16 @@ func Getpagesize() int {
 }
 
 // int stat(const char *path, struct stat * buf);
+//
 //export stat
 func libc_stat(pathname *byte, ptr unsafe.Pointer) int32
 
-// int fstat(fd int, struct stat * buf);
+// int fstat(int fd, struct stat * buf);
+//
 //export fstat
 func libc_fstat(fd int32, ptr unsafe.Pointer) int32
 
 // int lstat(const char *path, struct stat * buf);
+//
 //export lstat
 func libc_lstat(pathname *byte, ptr unsafe.Pointer) int32

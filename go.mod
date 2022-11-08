@@ -1,6 +1,6 @@
 module github.com/tinygo-org/tinygo
 
-go 1.16
+go 1.18
 
 require (
 	github.com/aykevl/go-wasm v0.0.2-0.20220616010729-4a0a888aebdc
@@ -11,12 +11,25 @@ require (
 	github.com/go-interpreter/wagon v0.6.0
 	github.com/gofrs/flock v0.8.1
 	github.com/google/shlex v0.0.0-20181106134648-c34317bd91bf
+	github.com/inhies/go-bytesize v0.0.0-20220417184213-4913239db9cf
 	github.com/marcinbor85/gohex v0.0.0-20200531091804-343a4b548892
 	github.com/mattn/go-colorable v0.1.9
+	github.com/mattn/go-tty v0.0.4
 	github.com/uuosio/chain v0.1.13
-	go.bug.st/serial v1.1.3
-	golang.org/x/sys v0.0.0-20220114195835-da31bd327af9
+	go.bug.st/serial v1.3.5
+	golang.org/x/sys v0.0.0-20220829200755-d48e67d00261
 	golang.org/x/tools v0.1.11
 	gopkg.in/yaml.v2 v2.4.0
-	tinygo.org/x/go-llvm v0.0.0-20220626113704-45f1e2dbf887
+	tinygo.org/x/go-llvm v0.0.0-20220802112859-5bb0b77907a7
+)
+
+require (
+	github.com/chromedp/sysutil v1.0.0 // indirect
+	github.com/creack/goselect v0.1.2 // indirect
+	github.com/gobwas/httphead v0.1.0 // indirect
+	github.com/gobwas/pool v0.2.1 // indirect
+	github.com/gobwas/ws v1.1.0 // indirect
+	github.com/josharian/intern v1.0.0 // indirect
+	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/mattn/go-isatty v0.0.14 // indirect
 )

@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"go/types"
 	"hash/crc32"
-	"io/ioutil"
+	"io/fs"
 	"math/bits"
 	"os"
 	"os/exec"
@@ -103,7 +103,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	}
 
 	// Create a temporary directory for intermediary files.
-	dir, err := ioutil.TempDir("", "tinygo")
+	dir, err := os.MkdirTemp("", "tinygo")
 	if err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 		libcDependencies = append(libcDependencies, libcJob)
 	case "wasi-libc":
 		path := filepath.Join(root, "lib/wasi-libc/sysroot/lib/wasm32-wasi/libc.a")
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 			return errors.New("could not find wasi-libc, perhaps you need to run `make wasi-libc`?")
 		}
 		libcDependencies = append(libcDependencies, dummyCompileJob(path))
@@ -197,7 +197,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 
 		Scheduler:          config.Scheduler(),
 		AutomaticStackSize: config.AutomaticStackSize(),
-		DefaultStackSize:   config.Target.DefaultStackSize,
+		DefaultStackSize:   config.StackSize(),
 		NeedsStackObjects:  config.NeedsStackObjects(),
 		Debug:              true,
 	}
@@ -389,7 +389,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 				// Packages are compiled independently anyway.
 				for _, cgoHeader := range pkg.CGoHeaders {
 					// Store the header text in a temporary file.
-					f, err := ioutil.TempFile(dir, "cgosnippet-*.c")
+					f, err := os.CreateTemp(dir, "cgosnippet-*.c")
 					if err != nil {
 						return err
 					}
@@ -450,7 +450,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 				if pkgInit.IsNil() {
 					panic("init not found for " + pkg.Pkg.Path())
 				}
-				err := interp.RunFunc(pkgInit, config.DumpSSA())
+				err := interp.RunFunc(pkgInit, config.Options.InterpTimeout, config.DumpSSA())
 				if err != nil {
 					return err
 				}
@@ -464,7 +464,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 				// Write to a temporary path that is renamed to the destination
 				// file to avoid race conditions with other TinyGo invocatiosn
 				// that might also be compiling this package at the same time.
-				f, err := ioutil.TempFile(filepath.Dir(job.result), filepath.Base(job.result))
+				f, err := os.CreateTemp(filepath.Dir(job.result), filepath.Base(job.result))
 				if err != nil {
 					return err
 				}
@@ -608,7 +608,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 				return err
 			}
 			defer llvmBuf.Dispose()
-			return ioutil.WriteFile(outpath, llvmBuf.Bytes(), 0666)
+			return os.WriteFile(outpath, llvmBuf.Bytes(), 0666)
 		case ".bc":
 			var buf llvm.MemoryBuffer
 			if config.UseThinLTO() {
@@ -617,10 +617,10 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 				buf = llvm.WriteBitcodeToMemoryBuffer(mod)
 			}
 			defer buf.Dispose()
-			return ioutil.WriteFile(outpath, buf.Bytes(), 0666)
+			return os.WriteFile(outpath, buf.Bytes(), 0666)
 		case ".ll":
 			data := []byte(mod.String())
-			return ioutil.WriteFile(outpath, data, 0666)
+			return os.WriteFile(outpath, data, 0666)
 		default:
 			panic("unreachable")
 		}
@@ -648,7 +648,7 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 				}
 			}
 			defer llvmBuf.Dispose()
-			return ioutil.WriteFile(objfile, llvmBuf.Bytes(), 0666)
+			return os.WriteFile(objfile, llvmBuf.Bytes(), 0666)
 		},
 	}
 
@@ -734,21 +734,18 @@ func Build(pkgName, outpath string, config *compileopts.Config, action func(Buil
 	// Add embedded files.
 	linkerDependencies = append(linkerDependencies, embedFileObjects...)
 
+	// Determine whether the compilation configuration would result in debug
+	// (DWARF) information in the object files.
+	var hasDebug = true
+	if config.GOOS() == "darwin" {
+		// Debug information isn't stored in the binary itself on MacOS but
+		// is left in the object files by default. The binary does store the
+		// path to these object files though.
+		hasDebug = false
+	}
+
 	// Strip debug information with -no-debug.
-	if !config.Debug() {
-		for _, tag := range config.BuildTags() {
-			if tag == "baremetal" {
-				// Don't use -no-debug on baremetal targets. It makes no sense:
-				// the debug information isn't flashed to the device anyway.
-				return fmt.Errorf("stripping debug information is unnecessary for baremetal targets")
-			}
-		}
-		if config.GOOS() == "darwin" {
-			// Debug information isn't stored in the binary itself on MacOS but
-			// is left in the object files by default. The binary does store the
-			// path to these object files though.
-			return errors.New("cannot remove debug information: MacOS doesn't store debug info in the executable by default")
-		}
+	if hasDebug && !config.Debug() {
 		if config.Target.Linker == "wasm-ld" {
 			// Don't just strip debug information, also compress relocations
 			// while we're at it. Relocations can only be compressed when debug
@@ -1089,7 +1086,7 @@ func createEmbedObjectFile(data, hexSum, sourceFile, sourceDir, tmpdir string, c
 // needed to convert a program to its final form. Some transformations are not
 // optional and must be run as the compiler expects them to run.
 func optimizeProgram(mod llvm.Module, config *compileopts.Config) error {
-	err := interp.Run(mod, config.DumpSSA())
+	err := interp.Run(mod, config.Options.InterpTimeout, config.DumpSSA())
 	if err != nil {
 		return err
 	}
@@ -1401,10 +1398,10 @@ func modifyStackSizes(executable string, stackSizeLoads []string, stackSizes map
 //
 // It might print something like the following:
 //
-//     function                         stack usage (in bytes)
-//     Reset_Handler                    316
-//     examples/blinky2.led1            92
-//     runtime.run$1                    300
+//	function                         stack usage (in bytes)
+//	Reset_Handler                    316
+//	examples/blinky2.led1            92
+//	runtime.run$1                    300
 func printStacks(calculatedStacks []string, stackSizes map[string]functionStackSize) {
 	// Print the sizes of all stacks.
 	fmt.Printf("%-32s %s\n", "function", "stack usage (in bytes)")

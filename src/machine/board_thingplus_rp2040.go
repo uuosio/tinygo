@@ -3,12 +3,13 @@
 
 package machine
 
-const (
-	LED = GPIO25
-
-	// Onboard crystal oscillator frequency, in MHz.
-	xoscFreq = 12 // MHz
+import (
+	"device/rp"
+	"runtime/interrupt"
 )
+
+// Onboard crystal oscillator frequency, in MHz.
+const xoscFreq = 12 // MHz
 
 // GPIO Pins
 const (
@@ -51,6 +52,8 @@ const (
 	A3 = GPIO29
 )
 
+const LED = GPIO25
+
 // I2C Pins.
 const (
 	I2C0_SCL_PIN = GPIO6 // N/A
@@ -78,4 +81,38 @@ const (
 	SPI1_SDO_PIN = GPIO15 // Tx
 	// Default Serial In Bus 1 for SPI communications to muSDcard
 	SPI1_SDI_PIN = GPIO12 // Rx
+)
+
+// UART pins
+const (
+	UART0_TX_PIN = GPIO0
+	UART0_RX_PIN = GPIO1
+	UART_TX_PIN  = UART0_TX_PIN
+	UART_RX_PIN  = UART0_RX_PIN
+)
+
+// UART on the RP2040
+var (
+	UART0  = &_UART0
+	_UART0 = UART{
+		Buffer: NewRingBuffer(),
+		Bus:    rp.UART0,
+	}
+)
+
+var DefaultUART = UART0
+
+func init() {
+	UART0.Interrupt = interrupt.New(rp.IRQ_UART0_IRQ, _UART0.handleInterrupt)
+}
+
+// USB identifiers
+const (
+	usb_STRING_PRODUCT      = "Thing Plus RP2040"
+	usb_STRING_MANUFACTURER = "SparkFun"
+)
+
+var (
+	usb_VID uint16 = 0x1B4F
+	usb_PID uint16 = 0x0026
 )

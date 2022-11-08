@@ -4,11 +4,10 @@
 // This contains the pin mappings for the Arduino Nano33 IoT board.
 //
 // For more information, see: https://store.arduino.cc/nano-33-iot
-//
 package machine
 
 // used to reset into bootloader
-const RESET_MAGIC_VALUE = 0x07738135
+const resetMagicValue = 0x07738135
 
 // GPIO Pins
 const (

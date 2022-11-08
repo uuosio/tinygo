@@ -3,6 +3,7 @@ package hid
 import (
 	"errors"
 	"machine"
+	"machine/usb"
 )
 
 // from usb-hid.go
@@ -14,38 +15,50 @@ var (
 
 const (
 	hidEndpoint = 4
+
+	usb_SET_REPORT_TYPE = 33
+	usb_SET_IDLE        = 10
 )
 
 type hidDevicer interface {
-	Callback() bool
+	Handler() bool
 }
 
 var devices [5]hidDevicer
 var size int
 
-// SetCallbackHandler sets the callback. Only the first time it is called, it
+// SetHandler sets the handler. Only the first time it is called, it
 // calls machine.EnableHID for USB configuration
-func SetCallbackHandler(d hidDevicer) {
+func SetHandler(d hidDevicer) {
 	if size == 0 {
-		machine.EnableHID(callback)
+		machine.EnableHID(handler, nil, setupHandler)
 	}
 
 	devices[size] = d
 	size++
 }
 
-func callback() {
+func handler() {
 	for _, d := range devices {
 		if d == nil {
 			continue
 		}
-		if done := d.Callback(); done {
+		if done := d.Handler(); done {
 			return
 		}
 	}
 }
 
+func setupHandler(setup usb.Setup) bool {
+	ok := false
+	if setup.BmRequestType == usb_SET_REPORT_TYPE && setup.BRequest == usb_SET_IDLE {
+		machine.SendZlp()
+		ok = true
+	}
+	return ok
+}
+
 // SendUSBPacket sends a HIDPacket.
 func SendUSBPacket(b []byte) {
-	machine.SendUSBHIDPacket(hidEndpoint, b)
+	machine.SendUSBInPacket(hidEndpoint, b)
 }

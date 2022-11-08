@@ -6,7 +6,7 @@
 // rp2040-boot-stage2.S
 //
 
-#define BOARD_PICO_FLASH_SPI_CLKDIV   2
+#define BOARD_PICO_FLASH_SPI_CLKDIV   4
 #define BOARD_CMD_READ                0xe7
 #define BOARD_QUAD_OK                 1
 #define BOARD_QUAD_ENABLE_STATUS_BYTE 2

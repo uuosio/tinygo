@@ -1,7 +1,8 @@
 package builder
 
 import (
-	"io/ioutil"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -94,7 +95,7 @@ func (l *Library) load(config *compileopts.Config, tmpdir string) (job *compileJ
 	target := config.Triple()
 	if l.makeHeaders != nil {
 		if _, err = os.Stat(headerPath); err != nil {
-			temporaryHeaderPath, err := ioutil.TempDir(outdir, "include.tmp*")
+			temporaryHeaderPath, err := os.MkdirTemp(outdir, "include.tmp*")
 			if err != nil {
 				return nil, nil, err
 			}
@@ -110,10 +111,10 @@ func (l *Library) load(config *compileopts.Config, tmpdir string) (job *compileJ
 			err = os.Rename(temporaryHeaderPath, headerPath)
 			if err != nil {
 				switch {
-				case os.IsExist(err):
+				case errors.Is(err, fs.ErrExist):
 					// Another invocation of TinyGo also seems to have already created the headers.
 
-				case runtime.GOOS == "windows" && os.IsPermission(err):
+				case runtime.GOOS == "windows" && errors.Is(err, fs.ErrPermission):
 					// On Windows, a rename with a destination directory that already
 					// exists does not result in an IsExist error, but rather in an
 					// access denied error. To be sure, check for this case by checking
@@ -155,7 +156,11 @@ func (l *Library) load(config *compileopts.Config, tmpdir string) (job *compileJ
 		}
 	}
 	if strings.HasPrefix(target, "arm") || strings.HasPrefix(target, "thumb") {
-		args = append(args, "-fshort-enums", "-fomit-frame-pointer", "-mfloat-abi=soft", "-fno-unwind-tables", "-fno-asynchronous-unwind-tables")
+		if strings.Split(target, "-")[2] == "linux" {
+			args = append(args, "-fno-unwind-tables", "-fno-asynchronous-unwind-tables")
+		} else {
+			args = append(args, "-fshort-enums", "-fomit-frame-pointer", "-mfloat-abi=soft", "-fno-unwind-tables", "-fno-asynchronous-unwind-tables")
+		}
 	}
 	if strings.HasPrefix(target, "avr") {
 		// AVR defaults to C float and double both being 32-bit. This deviates
@@ -189,7 +194,7 @@ func (l *Library) load(config *compileopts.Config, tmpdir string) (job *compileJ
 			defer once.Do(unlock)
 
 			// Create an archive of all object files.
-			f, err := ioutil.TempFile(outdir, "libc.a.tmp*")
+			f, err := os.CreateTemp(outdir, "libc.a.tmp*")
 			if err != nil {
 				return err
 			}
@@ -250,7 +255,7 @@ func (l *Library) load(config *compileopts.Config, tmpdir string) (job *compileJ
 			run: func(*compileJob) error {
 				var compileArgs []string
 				compileArgs = append(compileArgs, args...)
-				tmpfile, err := ioutil.TempFile(outdir, "crt1.o.tmp*")
+				tmpfile, err := os.CreateTemp(outdir, "crt1.o.tmp*")
 				if err != nil {
 					return err
 				}

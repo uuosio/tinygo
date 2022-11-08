@@ -4,7 +4,7 @@
 package machine
 
 // used to reset into bootloader
-const RESET_MAGIC_VALUE = 0x07738135
+const resetMagicValue = 0x07738135
 
 // GPIO Pins - Digital Low
 const (
@@ -28,14 +28,6 @@ const (
 	D13 = PA17 // PWM available
 )
 
-// LEDs on the Arduino Zero
-const (
-	LED      = LED1
-	LED1 Pin = D13
-	LED2 Pin = PA27 // TX LED
-	LED3 Pin = PB03 // RX LED
-)
-
 // ADC pins
 const (
 	AREF Pin = PA03
@@ -45,6 +37,14 @@ const (
 	ADC3 Pin = PA04
 	ADC4 Pin = PA05
 	ADC5 Pin = PB02
+)
+
+// LEDs on the Arduino Zero
+const (
+	LED      = LED1
+	LED1 Pin = D13
+	LED2 Pin = PA27 // TX LED
+	LED3 Pin = PB03 // RX LED
 )
 
 // SPI pins - EDBG connected

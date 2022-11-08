@@ -30,16 +30,38 @@ const (
 	PinInputPulldown
 )
 
+const (
+	GPIO0  Pin = 0
+	GPIO1  Pin = 1
+	GPIO2  Pin = 2
+	GPIO3  Pin = 3
+	GPIO4  Pin = 4
+	GPIO5  Pin = 5
+	GPIO6  Pin = 6
+	GPIO7  Pin = 7
+	GPIO8  Pin = 8
+	GPIO9  Pin = 9
+	GPIO10 Pin = 10
+	GPIO11 Pin = 11
+	GPIO12 Pin = 12
+	GPIO13 Pin = 13
+	GPIO14 Pin = 14
+	GPIO15 Pin = 15
+	GPIO16 Pin = 16
+	GPIO17 Pin = 17
+	GPIO18 Pin = 18
+	GPIO19 Pin = 19
+	GPIO20 Pin = 20
+	GPIO21 Pin = 21
+)
+
 type PinChange uint8
 
 // Pin change interrupt constants for SetInterrupt.
 const (
-	PinNoInterrupt PinChange = iota
-	PinRising
+	PinRising PinChange = iota + 1
 	PinFalling
 	PinToggle
-	PinLowLevel
-	PinHighLevel
 )
 
 // Configure this pin with the given configuration.
@@ -165,7 +187,7 @@ func (p Pin) SetInterrupt(change PinChange, callback func(Pin)) (err error) {
 		return ErrInvalidInputPin
 	}
 
-	if callback == nil || change == PinNoInterrupt {
+	if callback == nil {
 		// Disable this pin interrupt
 		p.pin().ClearBits(esp.GPIO_PIN_PIN_INT_TYPE_Msk | esp.GPIO_PIN_PIN_INT_ENA_Msk)
 
@@ -238,15 +260,6 @@ type UART struct {
 	DataErrorDetected    bool // set when data corruption detected
 	DataOverflowDetected bool // set when data overflow detected in UART FIFO buffer or RingBuffer
 }
-
-type UARTStopBits int
-
-const (
-	UARTStopBits_Default UARTStopBits = iota
-	UARTStopBits_1
-	UARTStopBits_1_5
-	UARTStopBits_2
-)
 
 const (
 	defaultDataBits = 8

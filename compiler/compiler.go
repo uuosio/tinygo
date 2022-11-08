@@ -18,12 +18,9 @@ import (
 	"github.com/tinygo-org/tinygo/compiler/llvmutil"
 	"github.com/tinygo-org/tinygo/loader"
 	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/types/typeutil"
 	"tinygo.org/x/go-llvm"
 )
-
-var typeParamUnderlyingType = func(t types.Type) types.Type {
-	return t
-}
 
 func init() {
 	llvm.InitializeAllTargets()
@@ -70,7 +67,7 @@ type compilerContext struct {
 	cu               llvm.Metadata
 	difiles          map[string]llvm.Metadata
 	ditypes          map[types.Type]llvm.Metadata
-	llvmTypes        map[types.Type]llvm.Type
+	llvmTypes        typeutil.Map
 	machine          llvm.TargetMachine
 	targetData       llvm.TargetData
 	intType          llvm.Type
@@ -95,7 +92,6 @@ func newCompilerContext(moduleName string, machine llvm.TargetMachine, config *C
 		DumpSSA:     dumpSSA,
 		difiles:     make(map[string]llvm.Metadata),
 		ditypes:     make(map[types.Type]llvm.Metadata),
-		llvmTypes:   make(map[types.Type]llvm.Type),
 		machine:     machine,
 		targetData:  machine.CreateTargetData(),
 		astComments: map[string]*ast.CommentGroup{},
@@ -329,19 +325,22 @@ func (c *compilerContext) getLLVMRuntimeType(name string) llvm.Type {
 // important for named struct types (which should only be created once).
 func (c *compilerContext) getLLVMType(goType types.Type) llvm.Type {
 	// Try to load the LLVM type from the cache.
-	if t, ok := c.llvmTypes[goType]; ok {
-		return t
+	// Note: *types.Named isn't unique when working with generics.
+	// See https://github.com/golang/go/issues/53914
+	// This is the reason for using typeutil.Map to lookup LLVM types for Go types.
+	ival := c.llvmTypes.At(goType)
+	if ival != nil {
+		return ival.(llvm.Type)
 	}
 	// Not already created, so adding this type to the cache.
 	llvmType := c.makeLLVMType(goType)
-	c.llvmTypes[goType] = llvmType
+	c.llvmTypes.Set(goType, llvmType)
 	return llvmType
 }
 
 // makeLLVMType creates a LLVM type for a Go type. Don't call this, use
 // getLLVMType instead.
 func (c *compilerContext) makeLLVMType(goType types.Type) llvm.Type {
-	goType = typeParamUnderlyingType(goType)
 	switch typ := goType.(type) {
 	case *types.Array:
 		elemType := c.getLLVMType(typ.Elem())
@@ -389,9 +388,9 @@ func (c *compilerContext) makeLLVMType(goType types.Type) llvm.Type {
 			// in LLVM IR, named structs are implemented as named structs in
 			// LLVM. This is because it is otherwise impossible to create
 			// self-referencing types such as linked lists.
-			llvmName := typ.Obj().Pkg().Path() + "." + typ.Obj().Name()
+			llvmName := typ.String()
 			llvmType := c.ctx.StructCreateNamed(llvmName)
-			c.llvmTypes[goType] = llvmType // avoid infinite recursion
+			c.llvmTypes.Set(goType, llvmType) // avoid infinite recursion
 			underlying := c.getLLVMType(st)
 			llvmType.StructSetBody(underlying.StructElementTypes(), false)
 			return llvmType
@@ -416,6 +415,8 @@ func (c *compilerContext) makeLLVMType(goType types.Type) llvm.Type {
 			members[i] = c.getLLVMType(typ.Field(i).Type())
 		}
 		return c.ctx.StructType(members, false)
+	case *types.TypeParam:
+		return c.getLLVMType(typ.Underlying())
 	case *types.Tuple:
 		members := make([]llvm.Type, typ.Len())
 		for i := 0; i < typ.Len(); i++ {
@@ -451,7 +452,6 @@ func (c *compilerContext) getDIType(typ types.Type) llvm.Metadata {
 // createDIType creates a new DWARF type. Don't call this function directly,
 // call getDIType instead.
 func (c *compilerContext) createDIType(typ types.Type) llvm.Metadata {
-	typ = typeParamUnderlyingType(typ)
 	llvmType := c.getLLVMType(typ)
 	sizeInBytes := c.targetData.TypeAllocSize(llvmType)
 	switch typ := typ.(type) {
@@ -615,6 +615,8 @@ func (c *compilerContext) createDIType(typ types.Type) llvm.Metadata {
 		})
 		temporaryMDNode.ReplaceAllUsesWith(md)
 		return md
+	case *types.TypeParam:
+		return c.getDIType(typ.Underlying())
 	default:
 		panic("unknown type while generating DWARF debug type: " + typ.String())
 	}
@@ -684,7 +686,7 @@ func (b *builder) getLocalVariable(variable *types.Var) llvm.Metadata {
 				Name:           param.Name(),
 				File:           b.getDIFile(pos.Filename),
 				Line:           pos.Line,
-				Type:           b.getDIType(variable.Type()),
+				Type:           b.getDIType(param.Type()),
 				AlwaysPreserve: true,
 				ArgNo:          i + 1,
 			})
@@ -782,8 +784,18 @@ func (c *compilerContext) createPackage(irbuilder llvm.Builder, pkg *ssa.Package
 		member := pkg.Members[name]
 		switch member := member.(type) {
 		case *ssa.Function:
+			if member.Synthetic == "generic function" {
+				// Do not try to build generic (non-instantiated) functions.
+				continue
+			}
 			// Create the function definition.
 			b := newBuilder(c, irbuilder, member)
+			if _, ok := mathToLLVMMapping[member.RelString(nil)]; ok {
+				// The body of this function (if there is one) is ignored and
+				// replaced with a LLVM intrinsic call.
+				b.defineMathOp()
+				continue
+			}
 			if member.Blocks == nil {
 				// Try to define this as an intrinsic function.
 				b.defineIntrinsicFunction()
@@ -1018,7 +1030,7 @@ func (c *compilerContext) getEmbedFileString(file *loader.EmbedFile) llvm.Value 
 // parameters, create basic blocks, and set up debug information.
 // This is separated out from createFunction() so that it is also usable to
 // define compiler intrinsics like the atomic operations in sync/atomic.
-func (b *builder) createFunctionStart() {
+func (b *builder) createFunctionStart(intrinsic bool) {
 	if b.DumpSSA {
 		fmt.Printf("\nfunc %s:\n", b.fn)
 	}
@@ -1031,9 +1043,17 @@ func (b *builder) createFunctionStart() {
 		b.addError(b.fn.Pos(), errValue)
 		return
 	}
+
 	b.addStandardDefinedAttributes(b.llvmFn)
 	if !b.info.exported {
-		b.llvmFn.SetVisibility(llvm.HiddenVisibility)
+		// Do not set visibility for local linkage (internal or private).
+		// Otherwise a "local linkage requires default visibility"
+		// assertion error in llvm-project/llvm/include/llvm/IR/GlobalValue.h:236
+		// is thrown.
+		if b.llvmFn.Linkage() != llvm.InternalLinkage &&
+			b.llvmFn.Linkage() != llvm.PrivateLinkage {
+			b.llvmFn.SetVisibility(llvm.HiddenVisibility)
+		}
 		b.llvmFn.SetUnnamedAddr(true)
 	}
 	if b.info.section != "" {
@@ -1083,20 +1103,20 @@ func (b *builder) createFunctionStart() {
 	}
 
 	// Pre-create all basic blocks in the function.
-	for _, block := range b.fn.DomPreorder() {
-		llvmBlock := b.ctx.AddBasicBlock(b.llvmFn, block.Comment)
-		b.blockEntries[block] = llvmBlock
-		b.blockExits[block] = llvmBlock
-	}
 	var entryBlock llvm.BasicBlock
-	if len(b.fn.Blocks) != 0 {
-		// Normal functions have an entry block.
-		entryBlock = b.blockEntries[b.fn.Blocks[0]]
-	} else {
+	if intrinsic {
 		// This function isn't defined in Go SSA. It is probably a compiler
 		// intrinsic (like an atomic operation). Create the entry block
 		// manually.
 		entryBlock = b.ctx.AddBasicBlock(b.llvmFn, "entry")
+	} else {
+		for _, block := range b.fn.DomPreorder() {
+			llvmBlock := b.ctx.AddBasicBlock(b.llvmFn, block.Comment)
+			b.blockEntries[block] = llvmBlock
+			b.blockExits[block] = llvmBlock
+		}
+		// Normal functions have an entry block.
+		entryBlock = b.blockEntries[b.fn.Blocks[0]]
 	}
 	b.SetInsertPointAtEnd(entryBlock)
 
@@ -1178,7 +1198,7 @@ func (b *builder) createFunctionStart() {
 // function must not yet be defined, otherwise this function will create a
 // diagnostic.
 func (b *builder) createFunction() {
-	b.createFunctionStart()
+	b.createFunctionStart(false)
 
 	// Fill blocks with instructions.
 	for _, block := range b.fn.DomPreorder() {
@@ -1257,6 +1277,7 @@ func (b *builder) createFunction() {
 	// Create anonymous functions (closures etc.).
 	for _, sub := range b.fn.AnonFuncs {
 		b := newBuilder(b.compilerContext, b.Builder, sub)
+		b.llvmFn.SetLinkage(llvm.InternalLinkage)
 		b.createFunction()
 	}
 }
@@ -1541,6 +1562,12 @@ func (b *builder) createBuiltin(argTypes []types.Type, argValues []llvm.Value, c
 			case *types.Pointer:
 				ptrValue := b.CreatePtrToInt(value, b.uintptrType, "")
 				b.createRuntimeCall("printptr", []llvm.Value{ptrValue}, "")
+			case *types.Slice:
+				bufptr := b.CreateExtractValue(value, 0, "")
+				buflen := b.CreateExtractValue(value, 1, "")
+				bufcap := b.CreateExtractValue(value, 2, "")
+				ptrValue := b.CreatePtrToInt(bufptr, b.uintptrType, "")
+				b.createRuntimeCall("printslice", []llvm.Value{ptrValue, buflen, bufcap}, "")
 			default:
 				return llvm.Value{}, b.makeError(pos, "unknown arg type: "+typ.String())
 			}
@@ -1571,6 +1598,20 @@ func (b *builder) createBuiltin(argTypes []types.Type, argValues []llvm.Value, c
 		ptr := argValues[0]
 		len := argValues[1]
 		return b.CreateGEP(ptr, []llvm.Value{len}, ""), nil
+	case "Alignof": // unsafe.Alignof
+		align := b.targetData.ABITypeAlignment(argValues[0].Type())
+		return llvm.ConstInt(b.uintptrType, uint64(align), false), nil
+	case "Offsetof": // unsafe.Offsetof
+		// This builtin is a bit harder to implement and may need a bit of
+		// refactoring to work (it may be easier to implement if we have access
+		// to the underlying Go SSA instruction). It is also rarely used: it
+		// only applies in generic code and unsafe.Offsetof isn't very commonly
+		// used anyway.
+		// In other words, postpone it to some other day.
+		return llvm.Value{}, b.makeError(pos, "todo: unsafe.Offsetof")
+	case "Sizeof": // unsafe.Sizeof
+		size := b.targetData.TypeAllocSize(argValues[0].Type())
+		return llvm.ConstInt(b.uintptrType, size, false), nil
 	case "Slice": // unsafe.Slice
 		// This creates a slice from a pointer and a length.
 		// Note that the exception mentioned in the documentation (if the

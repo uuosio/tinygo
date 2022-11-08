@@ -18,13 +18,21 @@ import (
 	"unsafe"
 )
 
-const gcAsserts = false // perform sanity checks
-
 // Ever-incrementing pointer: no memory is freed.
 var heapptr = heapStart
 
+// Total amount allocated for runtime.MemStats
+var gcTotalAlloc uint64
+
+// Total number of calls to alloc()
+var gcMallocs uint64
+
+// Total number of objected freed; for leaking collector this stays 0
+const gcFrees = 0
+
 // Inlining alloc() speeds things up slightly but bloats the executable by 50%,
 // see https://github.com/tinygo-org/tinygo/issues/2674.  So don't.
+//
 //go:noinline
 func alloc(size uintptr, layout unsafe.Pointer) unsafe.Pointer {
 	// TODO: this can be optimized by not casting between pointers and ints so
@@ -32,6 +40,8 @@ func alloc(size uintptr, layout unsafe.Pointer) unsafe.Pointer {
 	// systems).
 	size = align(size)
 	addr := heapptr
+	gcTotalAlloc += uint64(size)
+	gcMallocs++
 	heapptr += size
 	for heapptr >= heapEnd {
 		// Try to increase the heap and check again.

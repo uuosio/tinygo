@@ -5,43 +5,42 @@ package machine
 
 import (
 	"device/rp"
-	"runtime/interrupt"
 )
 
 const deviceName = rp.Device
 
 const (
 	// GPIO pins
-	GPIO0  Pin = 0
-	GPIO1  Pin = 1
-	GPIO2  Pin = 2
-	GPIO3  Pin = 3
-	GPIO4  Pin = 4
-	GPIO5  Pin = 5
-	GPIO6  Pin = 6
-	GPIO7  Pin = 7
-	GPIO8  Pin = 8
-	GPIO9  Pin = 9
-	GPIO10 Pin = 10
-	GPIO11 Pin = 11
-	GPIO12 Pin = 12
-	GPIO13 Pin = 13
-	GPIO14 Pin = 14
-	GPIO15 Pin = 15
-	GPIO16 Pin = 16
-	GPIO17 Pin = 17
-	GPIO18 Pin = 18
-	GPIO19 Pin = 19
-	GPIO20 Pin = 20
-	GPIO21 Pin = 21
-	GPIO22 Pin = 22
-	GPIO23 Pin = 23
-	GPIO24 Pin = 24
-	GPIO25 Pin = 25
-	GPIO26 Pin = 26
-	GPIO27 Pin = 27
-	GPIO28 Pin = 28
-	GPIO29 Pin = 29
+	GPIO0  Pin = 0  // peripherals: PWM0 channel A
+	GPIO1  Pin = 1  // peripherals: PWM0 channel B
+	GPIO2  Pin = 2  // peripherals: PWM1 channel A
+	GPIO3  Pin = 3  // peripherals: PWM1 channel B
+	GPIO4  Pin = 4  // peripherals: PWM2 channel A
+	GPIO5  Pin = 5  // peripherals: PWM2 channel B
+	GPIO6  Pin = 6  // peripherals: PWM3 channel A
+	GPIO7  Pin = 7  // peripherals: PWM3 channel B
+	GPIO8  Pin = 8  // peripherals: PWM4 channel A
+	GPIO9  Pin = 9  // peripherals: PWM4 channel B
+	GPIO10 Pin = 10 // peripherals: PWM5 channel A
+	GPIO11 Pin = 11 // peripherals: PWM5 channel B
+	GPIO12 Pin = 12 // peripherals: PWM6 channel A
+	GPIO13 Pin = 13 // peripherals: PWM6 channel B
+	GPIO14 Pin = 14 // peripherals: PWM7 channel A
+	GPIO15 Pin = 15 // peripherals: PWM7 channel B
+	GPIO16 Pin = 16 // peripherals: PWM0 channel A
+	GPIO17 Pin = 17 // peripherals: PWM0 channel B
+	GPIO18 Pin = 18 // peripherals: PWM1 channel A
+	GPIO19 Pin = 19 // peripherals: PWM1 channel B
+	GPIO20 Pin = 20 // peripherals: PWM2 channel A
+	GPIO21 Pin = 21 // peripherals: PWM2 channel B
+	GPIO22 Pin = 22 // peripherals: PWM3 channel A
+	GPIO23 Pin = 23 // peripherals: PWM3 channel B
+	GPIO24 Pin = 24 // peripherals: PWM4 channel A
+	GPIO25 Pin = 25 // peripherals: PWM4 channel B
+	GPIO26 Pin = 26 // peripherals: PWM5 channel A
+	GPIO27 Pin = 27 // peripherals: PWM5 channel B
+	GPIO28 Pin = 28 // peripherals: PWM6 channel A
+	GPIO29 Pin = 29 // peripherals: PWM6 channel B
 
 	// Analog pins
 	ADC0 Pin = GPIO26
@@ -89,38 +88,6 @@ func ticks() uint64 {
 //go:linkname lightSleep runtime.machineLightSleep
 func lightSleep(ticks uint64) {
 	timer.lightSleep(ticks)
-}
-
-// UART pins
-const (
-	UART_TX_PIN  = UART0_TX_PIN
-	UART_RX_PIN  = UART0_RX_PIN
-	UART0_TX_PIN = GPIO0
-	UART0_RX_PIN = GPIO1
-	UART1_TX_PIN = GPIO8
-	UART1_RX_PIN = GPIO9
-)
-
-// UART on the RP2040
-var (
-	UART0  = &_UART0
-	_UART0 = UART{
-		Buffer: NewRingBuffer(),
-		Bus:    rp.UART0,
-	}
-
-	UART1  = &_UART1
-	_UART1 = UART{
-		Buffer: NewRingBuffer(),
-		Bus:    rp.UART1,
-	}
-)
-
-var DefaultUART = UART0
-
-func init() {
-	UART0.Interrupt = interrupt.New(rp.IRQ_UART0_IRQ, _UART0.handleInterrupt)
-	UART1.Interrupt = interrupt.New(rp.IRQ_UART1_IRQ, _UART1.handleInterrupt)
 }
 
 // CurrentCore returns the core number the call was made from.

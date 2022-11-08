@@ -43,7 +43,7 @@ See the [getting started instructions](https://tinygo.org/getting-started/) for 
 
 You can compile TinyGo programs for microcontrollers, WebAssembly and Linux.
 
-The following 85 microcontroller boards are currently supported:
+The following 91 microcontroller boards are currently supported:
 
 * [Adafruit Circuit Playground Bluefruit](https://www.adafruit.com/product/4333)
 * [Adafruit Circuit Playground Express](https://www.adafruit.com/product/3333)
@@ -66,7 +66,9 @@ The following 85 microcontroller boards are currently supported:
 * [Adafruit PyGamer](https://www.adafruit.com/product/4242)
 * [Adafruit PyPortal](https://www.adafruit.com/product/4116)
 * [Adafruit QT Py](https://www.adafruit.com/product/4600)
+* [Adafruit QT Py RP2040](https://www.adafruit.com/product/4900)
 * [Adafruit Trinket M0](https://www.adafruit.com/product/3500)
+* [Adafruit Trinkey QT2040](https://adafruit.com/product/5056)
 * [Arduino Mega 1280](https://www.arduino.cc/en/Main/arduinoBoardMega/)
 * [Arduino Mega 2560](https://store.arduino.cc/arduino-mega-2560-rev3)
 * [Arduino MKR1000](https://store.arduino.cc/arduino-mkr1000-wifi)
@@ -89,11 +91,13 @@ The following 85 microcontroller boards are currently supported:
 * [ESP8266 - d1mini](https://www.espressif.com/en/products/socs/esp8266)
 * [ESP8266 - NodeMCU](https://www.espressif.com/en/products/socs/esp8266)
 * [Game Boy Advance](https://en.wikipedia.org/wiki/Game_Boy_Advance)
+* [iLabs Challenger RP2040 LoRa](https://ilabs.se/product/challenger-rp2040-lora/)
 * [M5Stack](https://docs.m5stack.com/en/core/basic)
 * [M5Stack Core2](https://shop.m5stack.com/products/m5stack-core2-esp32-iot-development-kit)
 * [M5Stamp C3](https://docs.m5stack.com/en/core/stamp_c3)
 * [Makerdiary nRF52840-MDK](https://wiki.makerdiary.com/nrf52840-mdk/)
 * [Makerdiary nRF52840-MDK USB Dongle](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/)
+* [MCH2022 badge](https://badge.team/docs/badges/mch2022/)
 * [Microchip SAM E54 Xplained Pro](https://www.microchip.com/developmenttools/productdetails/atsame54-xpro)
 * [nice!nano](https://docs.nicekeyboards.com/#/nice!nano/)
 * [Nintendo Switch](https://www.nintendo.com/switch/)
@@ -105,6 +109,8 @@ The following 85 microcontroller boards are currently supported:
 * [Particle Boron](https://docs.particle.io/datasheets/cellular/boron-datasheet/)
 * [Particle Xenon](https://docs.particle.io/datasheets/discontinued/xenon-datasheet/)
 * [Phytec reel board](https://www.phytec.eu/product-eu/internet-of-things/reelboard/)
+* [Pimoroni Badger2040](https://shop.pimoroni.com/products/badger-2040)
+* [Pimoroni Tufty2040](https://shop.pimoroni.com/products/tufty-2040)
 * [PineTime DevKit](https://www.pine64.org/pinetime/)
 * [PJRC Teensy 3.6](https://www.pjrc.com/store/teensy36.html)
 * [PJRC Teensy 4.0](https://www.pjrc.com/store/teensy40.html)
@@ -114,10 +120,12 @@ The following 85 microcontroller boards are currently supported:
 * [Raytac MDBT50Q-RX Dongle (with TinyUF2 bootloader)](https://www.adafruit.com/product/5199)
 * [Seeed Seeeduino XIAO](https://www.seeedstudio.com/Seeeduino-XIAO-Arduino-Microcontroller-SAMD21-Cortex-M0+-p-4426.html)
 * [Seeed XIAO BLE](https://www.seeedstudio.com/Seeed-XIAO-BLE-nRF52840-p-5201.html)
+* [Seeed XIAO ESP32C3](https://www.seeedstudio.com/Seeed-XIAO-ESP32C3-p-5431.html)
+* [Seeed XIAO RP2040](https://www.seeedstudio.com/XIAO-RP2040-v1-0-p-5026.html)
 * [Seeed LoRa-E5 Development Kit](https://www.seeedstudio.com/LoRa-E5-Dev-Kit-p-4868.html)
 * [Seeed Sipeed MAix BiT](https://www.seeedstudio.com/Sipeed-MAix-BiT-for-RISC-V-AI-IoT-p-2872.html)
 * [Seeed Wio Terminal](https://www.seeedstudio.com/Wio-Terminal-p-4509.html)
-* [SiFIve HiFive1 Rev B](https://www.sifive.com/boards/hifive1)
+* [SiFIve HiFive1 Rev B](https://www.sifive.com/boards/hifive1-rev-b)
 * [Sparkfun Thing Plus RP2040](https://www.sparkfun.com/products/17745)
 * [ST Micro "Nucleo" F103RB](https://www.st.com/en/evaluation-tools/nucleo-f103rb.html)
 * [ST Micro "Nucleo" F722ZE](https://www.st.com/en/evaluation-tools/nucleo-f722ze.html)

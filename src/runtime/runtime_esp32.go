@@ -11,8 +11,13 @@ import (
 
 // This is the function called on startup right after the stack pointer has been
 // set.
+//
 //export main
 func main() {
+	// Disable the protection on the watchdog timer (needed when started from
+	// the bootloader).
+	esp.RTCCNTL.WDTWPROTECT.Set(0x050D83AA1)
+
 	// Disable both watchdog timers that are enabled by default on startup.
 	// Note that these watchdogs can be protected, but the ROM bootloader
 	// doesn't seem to protect them.
@@ -43,7 +48,7 @@ func main() {
 	clearbss()
 
 	// Initialize UART.
-	machine.Serial.Configure(machine.UARTConfig{})
+	machine.InitSerial()
 
 	// Initialize main system timer used for time.Now.
 	initTimer()

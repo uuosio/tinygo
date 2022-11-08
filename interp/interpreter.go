@@ -17,8 +17,6 @@ func (r *runner) run(fn *function, params []value, parentMem *memoryView, indent
 	locals := make([]value, len(fn.locals))
 	r.callsExecuted++
 
-	t0 := time.Since(r.start)
-
 	// Parameters are considered a kind of local values.
 	for i, param := range params {
 		locals[i] = param
@@ -143,11 +141,10 @@ func (r *runner) run(fn *function, params []value, parentMem *memoryView, indent
 		}
 		switch inst.opcode {
 		case llvm.Ret:
-			const maxInterpSeconds = 180
-			if t0 > maxInterpSeconds*time.Second {
-				// Running for more than maxInterpSeconds seconds. This should never happen, but does.
+			if time.Since(r.start) > r.timeout {
+				// Running for more than the allowed timeout; This shouldn't happen, but it does.
 				// See github.com/tinygo-org/tinygo/issues/2124
-				return nil, mem, r.errorAt(fn.blocks[0].instructions[0], fmt.Errorf("interp: running for more than %d seconds, timing out (executed calls: %d)", maxInterpSeconds, r.callsExecuted))
+				return nil, mem, r.errorAt(fn.blocks[0].instructions[0], fmt.Errorf("interp: running for more than %s, timing out (executed calls: %d)", r.timeout, r.callsExecuted))
 			}
 
 			if len(operands) != 0 {
@@ -372,6 +369,11 @@ func (r *runner) run(fn *function, params []value, parentMem *memoryView, indent
 				nBytes := uint32(operands[3].Uint())
 				dstObj := mem.getWritable(dst.index())
 				dstBuf := dstObj.buffer.asRawValue(r)
+				if mem.get(src.index()).buffer == nil {
+					// Looks like the source buffer is not defined.
+					// This can happen with //extern or //go:embed.
+					return nil, mem, r.errorAt(inst, errUnsupportedRuntimeInst)
+				}
 				srcBuf := mem.get(src.index()).buffer.asRawValue(r)
 				copy(dstBuf.buf[dst.offset():dst.offset()+nBytes], srcBuf.buf[src.offset():])
 				dstObj.buffer = dstBuf

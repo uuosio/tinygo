@@ -10,7 +10,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"reflect"
@@ -52,6 +51,7 @@ func TestBuild(t *testing.T) {
 		"embed/",
 		"float.go",
 		"gc.go",
+		"generics.go",
 		"goroutines.go",
 		"init.go",
 		"init_multi.go",
@@ -66,20 +66,9 @@ func TestBuild(t *testing.T) {
 		"stdlib.go",
 		"string.go",
 		"structs.go",
+		"testing.go",
+		"timers.go",
 		"zeroalloc.go",
-	}
-	_, minor, err := goenv.GetGorootVersion(goenv.Get("GOROOT"))
-	if err != nil {
-		t.Fatal("could not read version from GOROOT:", err)
-	}
-	if minor >= 17 {
-		tests = append(tests, "go1.17.go")
-	}
-	if minor >= 18 {
-		tests = append(tests, "generics.go")
-		tests = append(tests, "testing_go118.go")
-	} else {
-		tests = append(tests, "testing.go")
 	}
 
 	if *testTarget != "" {
@@ -181,6 +170,14 @@ func runPlatTests(options compileopts.Options, tests []string, t *testing.T) {
 	}
 
 	for _, name := range tests {
+		if options.GOOS == "linux" && (options.GOARCH == "arm" || options.GOARCH == "386") {
+			switch name {
+			case "timers.go":
+				// Timer tests do not work because syscall.seek is implemented
+				// as Assembly in mainline Go and causes linker failure
+				continue
+			}
+		}
 		if options.Target == "simavr" {
 			// Not all tests are currently supported on AVR.
 			// Skip the ones that aren't.
@@ -193,7 +190,7 @@ func runPlatTests(options compileopts.Options, tests []string, t *testing.T) {
 				// Does not pass due to high mark false positive rate.
 				continue
 
-			case "json.go", "stdlib.go", "testing.go", "testing_go118.go":
+			case "json.go", "stdlib.go", "testing.go":
 				// Breaks interp.
 				continue
 
@@ -207,6 +204,11 @@ func runPlatTests(options compileopts.Options, tests []string, t *testing.T) {
 
 			case "cgo/":
 				// CGo does not work on AVR.
+				continue
+
+			case "timers.go":
+				// Doesn't compile:
+				//   panic: compiler: could not store type code number inside interface type code
 				continue
 
 			default:
@@ -260,10 +262,11 @@ func emuCheck(t *testing.T, options compileopts.Options) {
 		t.Fatal("failed to load target spec:", err)
 	}
 	if spec.Emulator != "" {
-		_, err := exec.LookPath(strings.SplitN(spec.Emulator, " ", 2)[0])
+		emulatorCommand := strings.SplitN(spec.Emulator, " ", 2)[0]
+		_, err := exec.LookPath(emulatorCommand)
 		if err != nil {
 			if errors.Is(err, exec.ErrNotFound) {
-				t.Skipf("emulator not installed: %q", spec.Emulator[0])
+				t.Skipf("emulator not installed: %q", emulatorCommand)
 			}
 
 			t.Errorf("searching for emulator: %v", err)
@@ -275,14 +278,15 @@ func emuCheck(t *testing.T, options compileopts.Options) {
 func optionsFromTarget(target string, sema chan struct{}) compileopts.Options {
 	return compileopts.Options{
 		// GOOS/GOARCH are only used if target == ""
-		GOOS:      goenv.Get("GOOS"),
-		GOARCH:    goenv.Get("GOARCH"),
-		GOARM:     goenv.Get("GOARM"),
-		Target:    target,
-		Semaphore: sema,
-		Debug:     true,
-		VerifyIR:  true,
-		Opt:       "z",
+		GOOS:          goenv.Get("GOOS"),
+		GOARCH:        goenv.Get("GOARCH"),
+		GOARM:         goenv.Get("GOARM"),
+		Target:        target,
+		Semaphore:     sema,
+		InterpTimeout: 180 * time.Second,
+		Debug:         true,
+		VerifyIR:      true,
+		Opt:           "z",
 	}
 }
 
@@ -292,12 +296,13 @@ func optionsFromTarget(target string, sema chan struct{}) compileopts.Options {
 func optionsFromOSARCH(osarch string, sema chan struct{}) compileopts.Options {
 	parts := strings.Split(osarch, "/")
 	options := compileopts.Options{
-		GOOS:      parts[0],
-		GOARCH:    parts[1],
-		Semaphore: sema,
-		Debug:     true,
-		VerifyIR:  true,
-		Opt:       "z",
+		GOOS:          parts[0],
+		GOARCH:        parts[1],
+		Semaphore:     sema,
+		InterpTimeout: 180 * time.Second,
+		Debug:         true,
+		VerifyIR:      true,
+		Opt:           "z",
 	}
 	if options.GOARCH == "arm" {
 		options.GOARM = parts[2]
@@ -319,7 +324,7 @@ func runTestWithConfig(name string, t *testing.T, options compileopts.Options, c
 	if path[len(path)-1] == '/' {
 		txtpath = path + "out.txt"
 	}
-	expected, err := ioutil.ReadFile(txtpath)
+	expected, err := os.ReadFile(txtpath)
 	if err != nil {
 		t.Fatal("could not read expected output file:", err)
 	}
@@ -430,7 +435,7 @@ func TestTest(t *testing.T) {
 				defer out.Close()
 
 				opts := targ.opts
-				passed, err := Test("github.com/tinygo-org/tinygo/tests/testing/pass", out, out, &opts, false, false, false, "", "", "", "")
+				passed, err := Test("github.com/tinygo-org/tinygo/tests/testing/pass", out, out, &opts, false, false, false, "", "", "", false, "")
 				if err != nil {
 					t.Errorf("test error: %v", err)
 				}
@@ -451,7 +456,7 @@ func TestTest(t *testing.T) {
 				defer out.Close()
 
 				opts := targ.opts
-				passed, err := Test("github.com/tinygo-org/tinygo/tests/testing/fail", out, out, &opts, false, false, false, "", "", "", "")
+				passed, err := Test("github.com/tinygo-org/tinygo/tests/testing/fail", out, out, &opts, false, false, false, "", "", "", false, "")
 				if err != nil {
 					t.Errorf("test error: %v", err)
 				}
@@ -478,7 +483,7 @@ func TestTest(t *testing.T) {
 
 				var output bytes.Buffer
 				opts := targ.opts
-				passed, err := Test("github.com/tinygo-org/tinygo/tests/testing/nothing", io.MultiWriter(&output, out), out, &opts, false, false, false, "", "", "", "")
+				passed, err := Test("github.com/tinygo-org/tinygo/tests/testing/nothing", io.MultiWriter(&output, out), out, &opts, false, false, false, "", "", "", false, "")
 				if err != nil {
 					t.Errorf("test error: %v", err)
 				}
@@ -502,7 +507,7 @@ func TestTest(t *testing.T) {
 				defer out.Close()
 
 				opts := targ.opts
-				passed, err := Test("github.com/tinygo-org/tinygo/tests/testing/builderr", out, out, &opts, false, false, false, "", "", "", "")
+				passed, err := Test("github.com/tinygo-org/tinygo/tests/testing/builderr", out, out, &opts, false, false, false, "", "", "", false, "")
 				if err == nil {
 					t.Error("test did not error")
 				}

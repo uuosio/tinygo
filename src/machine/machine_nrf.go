@@ -5,13 +5,8 @@ package machine
 
 import (
 	"device/nrf"
-	"errors"
 	"runtime/interrupt"
 	"unsafe"
-)
-
-var (
-	ErrTxInvalidSliceSize = errors.New("SPI write and read slices must be same size")
 )
 
 const deviceName = nrf.Device
@@ -230,7 +225,7 @@ func (i2c *I2C) Configure(config I2CConfig) error {
 
 	// Default I2C bus speed is 100 kHz.
 	if config.Frequency == 0 {
-		config.Frequency = TWI_FREQ_100KHZ
+		config.Frequency = 100 * KHz
 	}
 	// Default I2C pins if not set.
 	if config.SDA == 0 && config.SCL == 0 {
@@ -253,7 +248,7 @@ func (i2c *I2C) Configure(config I2CConfig) error {
 		(nrf.GPIO_PIN_CNF_DRIVE_S0D1 << nrf.GPIO_PIN_CNF_DRIVE_Pos) |
 		(nrf.GPIO_PIN_CNF_SENSE_Disabled << nrf.GPIO_PIN_CNF_SENSE_Pos))
 
-	if config.Frequency == TWI_FREQ_400KHZ {
+	if config.Frequency >= 400*KHz {
 		i2c.Bus.FREQUENCY.Set(nrf.TWI_FREQUENCY_FREQUENCY_K400)
 	} else {
 		i2c.Bus.FREQUENCY.Set(nrf.TWI_FREQUENCY_FREQUENCY_K100)
@@ -349,4 +344,42 @@ func (i2c *I2C) readByte() (byte, error) {
 	}
 	i2c.Bus.EVENTS_RXDREADY.Set(0)
 	return byte(i2c.Bus.RXD.Get()), nil
+}
+
+var rngStarted = false
+
+// GetRNG returns 32 bits of non-deterministic random data based on internal thermal noise.
+// According to Nordic's documentation, the random output is suitable for cryptographic purposes.
+func GetRNG() (ret uint32, err error) {
+	// There's no apparent way to check the status of the RNG peripheral's task, so simply start it
+	// to avoid deadlocking while waiting for output.
+	if !rngStarted {
+		nrf.RNG.TASKS_START.Set(1)
+		nrf.RNG.SetCONFIG_DERCEN(nrf.RNG_CONFIG_DERCEN_Enabled)
+		rngStarted = true
+	}
+
+	// The RNG returns one byte at a time, so stack up four bytes into a single uint32 for return.
+	for i := 0; i < 4; i++ {
+		// Wait for data to be ready.
+		for nrf.RNG.EVENTS_VALRDY.Get() == 0 {
+		}
+		// Append random byte to output.
+		ret = (ret << 8) ^ nrf.RNG.GetVALUE()
+		// Unset the EVENTS_VALRDY register to avoid reading the same random output twice.
+		nrf.RNG.EVENTS_VALRDY.Set(0)
+	}
+
+	return ret, nil
+}
+
+// ReadTemperature reads the silicon die temperature of the chip. The return
+// value is in milli-celsius.
+func ReadTemperature() int32 {
+	nrf.TEMP.TASKS_START.Set(1)
+	for nrf.TEMP.EVENTS_DATARDY.Get() == 0 {
+	}
+	temp := int32(nrf.TEMP.TEMP.Get()) * 250 // the returned value is in units of 0.25°C
+	nrf.TEMP.EVENTS_DATARDY.Set(0)
+	return temp
 }

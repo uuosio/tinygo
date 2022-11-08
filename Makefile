@@ -56,6 +56,23 @@ else
     LLVM_OPTION += '-DLLVM_ENABLE_ASSERTIONS=OFF'
 endif
 
+ifeq (1, $(STATIC))
+    # Build TinyGo as a fully statically linked binary (no dynamically loaded
+    # libraries such as a libc). This is not supported with glibc which is used
+    # on most major Linux distributions. However, it is supported in Alpine
+    # Linux with musl.
+    CGO_LDFLAGS += -static
+    # Also set the thread stack size to 1MB. This is necessary on musl as the
+    # default stack size is 128kB and LLVM uses more than that.
+    # For more information, see:
+    # https://wiki.musl-libc.org/functional-differences-from-glibc.html#Thread-stack-size
+    CGO_LDFLAGS += -Wl,-z,stack-size=1048576
+    # Build wasm-opt with static linking.
+    # For details, see:
+    # https://github.com/WebAssembly/binaryen/blob/version_102/.github/workflows/ci.yml#L181
+    BINARYEN_OPTION += -DCMAKE_CXX_FLAGS="-static" -DCMAKE_C_FLAGS="-static"
+endif
+
 # Cross compiling support.
 ifneq ($(CROSS),)
     CC = $(CROSS)-gcc
@@ -267,9 +284,9 @@ eosio-strip:
 tinygo: eosio-strip eosio-go
 	echo $(LLVM_PROJECTDIR)/llvm/include
 	@if [ ! -f "$(LLVM_BUILDDIR)/bin/llvm-config" ]; then echo "Fetch and build LLVM first by running:"; echo "  make llvm-source"; echo "  make $(LLVM_BUILDDIR)"; exit 1; fi
-	CGO_CPPFLAGS="$(CGO_CPPFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" $(GOENVFLAGS) $(GO) build -buildmode exe -o build/tinygo$(EXE) -tags byollvm -ldflags="-X github.com/tinygo-org/tinygo/goenv.GitSha1=`git rev-parse --short HEAD`" .
+	CGO_CPPFLAGS="$(CGO_CPPFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" $(GOENVFLAGS) $(GO) build -buildmode exe -o build/tinygo$(EXE) -tags "byollvm osusergo" -ldflags="-X github.com/tinygo-org/tinygo/goenv.GitSha1=`git rev-parse --short HEAD`" .
 test: wasi-libc
-	CGO_CPPFLAGS="$(CGO_CPPFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" $(GO) test $(GOTESTFLAGS) -timeout=20m -buildmode exe -tags byollvm ./builder ./cgo ./compileopts ./compiler ./interp ./transform .
+	CGO_CPPFLAGS="$(CGO_CPPFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" $(GO) test $(GOTESTFLAGS) -timeout=20m -buildmode exe -tags "byollvm osusergo" ./builder ./cgo ./compileopts ./compiler ./interp ./transform .
 
 # Standard library packages that pass tests on darwin, linux, wasi, and windows, but take over a minute in wasi
 TEST_PACKAGES_SLOW = \
@@ -284,7 +301,6 @@ TEST_PACKAGES_FAST = \
 	container/list \
 	container/ring \
 	crypto/des \
-	crypto/elliptic/internal/fiat \
 	crypto/internal/subtle \
 	crypto/md5 \
 	crypto/rc4 \
@@ -321,13 +337,24 @@ TEST_PACKAGES_FAST = \
 	unicode \
 	unicode/utf16 \
 	unicode/utf8 \
+	$(nil)
+
+# Assume this will go away before Go2, so only check minor version.
+ifeq ($(filter $(shell $(GO) env GOVERSION | cut -f 2 -d.), 16 17 18), )
+TEST_PACKAGES_FAST += crypto/internal/nistec/fiat
+else
+TEST_PACKAGES_FAST += crypto/elliptic/internal/fiat
+endif
 
 # archive/zip requires os.ReadAt, which is not yet supported on windows
+# compress/flate appears to hang on wasi
+# compress/lzw appears to hang on wasi
+# crypto/hmac fails on wasi, it exits with a "slice out of range" panic
 # debug/plan9obj requires os.ReadAt, which is not yet supported on windows
-# io/fs requires os.ReadDir, which is not yet supported on windows or wasi
+# io/ioutil requires os.ReadDir, which is not yet supported on windows or wasi
+# strconv requires recover() which is not yet supported on wasi
+# text/template/parse requires recover(), which is not yet supported on wasi
 # testing/fstest requires os.ReadDir, which is not yet supported on windows or wasi
-# compress/flate fails windows go 1.18, https://github.com/tinygo-org/tinygo/issues/2762
-# compress/lzw fails windows go 1.18 wasi, https://github.com/tinygo-org/tinygo/issues/2762
 
 # Additional standard library packages that pass tests on individual platforms
 TEST_PACKAGES_LINUX := \
@@ -337,7 +364,6 @@ TEST_PACKAGES_LINUX := \
 	crypto/hmac \
 	debug/dwarf \
 	debug/plan9obj \
-	io/fs \
 	io/ioutil \
 	strconv \
 	testing/fstest \
@@ -346,7 +372,12 @@ TEST_PACKAGES_LINUX := \
 TEST_PACKAGES_DARWIN := $(TEST_PACKAGES_LINUX)
 
 TEST_PACKAGES_WINDOWS := \
-	compress/lzw
+	compress/flate \
+	compress/lzw \
+	crypto/hmac \
+	strconv \
+	text/template/parse \
+	$(nil)
 
 # Report platforms on which each standard library package is known to pass tests
 jointmp := $(shell echo /tmp/join.$$$$)
@@ -361,12 +392,15 @@ report-stdlib-tests-pass:
 # Standard library packages that pass tests quickly on the current platform
 ifeq ($(shell uname),Darwin)
 TEST_PACKAGES_HOST := $(TEST_PACKAGES_FAST) $(TEST_PACKAGES_DARWIN)
+TEST_IOFS := true
 endif
 ifeq ($(shell uname),Linux)
 TEST_PACKAGES_HOST := $(TEST_PACKAGES_FAST) $(TEST_PACKAGES_LINUX)
+TEST_IOFS := true
 endif
 ifeq ($(OS),Windows_NT)
 TEST_PACKAGES_HOST := $(TEST_PACKAGES_FAST) $(TEST_PACKAGES_WINDOWS)
+TEST_IOFS := false
 endif
 
 # Test known-working standard library packages.
@@ -374,6 +408,12 @@ endif
 .PHONY: tinygo-test
 tinygo-test:
 	$(TINYGO) test $(TEST_PACKAGES_HOST) $(TEST_PACKAGES_SLOW)
+	@# io/fs requires os.ReadDir, not yet supported on windows or wasi. It also
+	@# requires a large stack-size. Hence, io/fs is only run conditionally.
+	@# For more details, see the comments on issue #3143.
+ifeq ($(TEST_IOFS),true)
+	$(TINYGO) test -stack-size=6MB io/fs
+endif
 tinygo-test-fast:
 	$(TINYGO) test $(TEST_PACKAGES_HOST)
 tinygo-bench:
@@ -383,9 +423,9 @@ tinygo-bench-fast:
 
 # Same thing, except for wasi rather than the current platform.
 tinygo-test-wasi:
-	$(TINYGO) test -target wasi $(TEST_PACKAGES_FAST) $(TEST_PACKAGES_SLOW)
+	$(TINYGO) test -target wasi $(TEST_PACKAGES_FAST) $(TEST_PACKAGES_SLOW) ./tests/runtime_wasi
 tinygo-test-wasi-fast:
-	$(TINYGO) test -target wasi $(TEST_PACKAGES_FAST)
+	$(TINYGO) test -target wasi $(TEST_PACKAGES_FAST) ./tests/runtime_wasi
 tinygo-bench-wasi:
 	$(TINYGO) test -target wasi -bench . $(TEST_PACKAGES_FAST) $(TEST_PACKAGES_SLOW)
 tinygo-bench-wasi-fast:
@@ -407,6 +447,7 @@ tinygo-baremetal:
 .PHONY: smoketest
 smoketest:
 	$(TINYGO) version
+	$(TINYGO) targets > /dev/null
 	# regression test for #2892
 	cd tests/testing/recurse && ($(TINYGO) test ./... > recurse.log && cat recurse.log && test $$(wc -l < recurse.log) = 2 && rm recurse.log)
 	# compile-only platform-independent examples
@@ -458,13 +499,13 @@ ifneq ($(WASM), 0)
 	@$(MD5SUM) test.wasm
 	$(TINYGO) build -size short -o test.wasm -tags=reelboard            examples/blinky1
 	@$(MD5SUM) test.wasm
-	$(TINYGO) build -size short -o test.wasm -tags=pca10040             examples/blinky2
-	@$(MD5SUM) test.wasm
-	$(TINYGO) build -size short -o test.wasm -tags=pca10056             examples/blinky2
+	$(TINYGO) build -size short -o test.wasm -tags=microbit             examples/microbit-blink
 	@$(MD5SUM) test.wasm
 	$(TINYGO) build -size short -o test.wasm -tags=circuitplay_express  examples/blinky1
 	@$(MD5SUM) test.wasm
 	$(TINYGO) build -size short -o test.wasm -tags=circuitplay_bluefruit examples/blinky1
+	@$(MD5SUM) test.wasm
+	$(TINYGO) build -size short -o test.wasm -tags=mch2022              examples/serial
 	@$(MD5SUM) test.wasm
 endif
 	# test all targets/boards
@@ -515,6 +556,8 @@ endif
 	$(TINYGO) build -size short -o test.hex -target=itsybitsy-m4        examples/blinky1
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=feather-m4          examples/blinky1
+	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=matrixportal-m4     examples/blinky1
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=pybadge             examples/blinky1
 	@$(MD5SUM) test.hex
@@ -582,11 +625,21 @@ endif
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=feather-rp2040 		examples/blinky1
 	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=qtpy-rp2040         examples/echo
+	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=macropad-rp2040 	examples/blinky1
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=badger2040          examples/blinky1
 	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=tufty2040           examples/blinky1
+	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=thingplus-rp2040    examples/blinky1
+	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=xiao-rp2040         examples/blinky1
+	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=challenger-rp2040    examples/blinky1
+	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=trinkey-qt2040      examples/temp
 	@$(MD5SUM) test.hex
 	# test pwm
 	$(TINYGO) build -size short -o test.hex -target=itsybitsy-m0        examples/pwm
@@ -595,10 +648,12 @@ endif
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=feather-m4          examples/pwm
 	@$(MD5SUM) test.hex
-	# test usbhid
+	# test usb
 	$(TINYGO) build -size short -o test.hex -target=feather-nrf52840    examples/hid-keyboard
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=circuitplay-express examples/hid-keyboard
+	@$(MD5SUM) test.hex
+	$(TINYGO) build -size short -o test.hex -target=feather-nrf52840    examples/usb-midi
 	@$(MD5SUM) test.hex
 ifneq ($(STM32), 0)
 	$(TINYGO) build -size short -o test.hex -target=bluepill            examples/blinky1
@@ -663,14 +718,18 @@ ifneq ($(XTENSA), 0)
 	@$(MD5SUM) test.bin
 	$(TINYGO) build -size short -o test.bin -target m5stack             examples/serial
 	@$(MD5SUM) test.bin
+	$(TINYGO) build -size short -o test.bin -target mch2022             examples/serial
+	@$(MD5SUM) test.bin
 endif
-	$(TINYGO) build -size short -o test.bin -target=esp32c3           	examples/serial
+	$(TINYGO) build -size short -o test.bin -target=esp32c3             examples/serial
+	@$(MD5SUM) test.bin
+	$(TINYGO) build -size short -o test.bin -target=esp32c3-12f         examples/serial
 	@$(MD5SUM) test.bin
 	$(TINYGO) build -size short -o test.bin -target=m5stamp-c3          examples/serial
 	@$(MD5SUM) test.bin
+	$(TINYGO) build -size short -o test.bin -target=xiao-esp32c3        examples/serial
+	@$(MD5SUM) test.bin
 	$(TINYGO) build -size short -o test.hex -target=hifive1b            examples/blinky1
-	@$(MD5SUM) test.hex
-	$(TINYGO) build -size short -o test.hex -target=hifive1-qemu        examples/serial
 	@$(MD5SUM) test.hex
 	$(TINYGO) build -size short -o test.hex -target=maixbit             examples/blinky1
 	@$(MD5SUM) test.hex
@@ -749,6 +808,7 @@ endif
 	@cp -rp lib/musl/src/internal        build/release/tinygo/lib/musl/src
 	@cp -rp lib/musl/src/malloc          build/release/tinygo/lib/musl/src
 	@cp -rp lib/musl/src/mman            build/release/tinygo/lib/musl/src
+	@cp -rp lib/musl/src/math            build/release/tinygo/lib/musl/src
 	@cp -rp lib/musl/src/signal          build/release/tinygo/lib/musl/src
 	@cp -rp lib/musl/src/stdio           build/release/tinygo/lib/musl/src
 	@cp -rp lib/musl/src/string          build/release/tinygo/lib/musl/src
@@ -767,6 +827,7 @@ endif
 	@cp -rp lib/picolibc/newlib/libc/string      build/release/tinygo/lib/picolibc/newlib/libc
 	@cp -rp lib/picolibc/newlib/libc/tinystdio   build/release/tinygo/lib/picolibc/newlib/libc
 	@cp -rp lib/picolibc/newlib/libm/common      build/release/tinygo/lib/picolibc/newlib/libm
+	@cp -rp lib/picolibc/newlib/libm/math        build/release/tinygo/lib/picolibc/newlib/libm
 	@cp -rp lib/picolibc-stdio.c         build/release/tinygo/lib
 	@cp -rp lib/wasi-libc/sysroot        build/release/tinygo/lib/wasi-libc/sysroot
 #	@cp -rp lib/wasi-libc-eosio/sysroot        build/release/tinygo/lib/wasi-libc-eosio/sysroot
