@@ -1,5 +1,5 @@
-//go:build gc.leaking
-// +build gc.leaking
+//go:build gc.leaking && !eosio
+// +build gc.leaking,!eosio
 
 package runtime
 
